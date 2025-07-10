@@ -1,0 +1,403 @@
+/* my-report.css - Styles for my-report.php */
+
+/* Custom Properties for Theming */
+:root {
+    --primary-color: #40a867;
+    --primary-dark: #357a55;
+    --secondary-color: #34495e;
+    --background-color: #f4f4f4;
+    --card-bg: #ffffff;
+    --text-color: #333333;
+    --text-muted: #666666;
+    --border-color: #e0e0e0;
+    --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
+    --transition: all 0.2s ease;
+    --border-radius: 8px;
+}
+
+/* Global Styles */
+* {
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Montserrat', sans-serif;
+    background-color: var(--background-color);
+    margin: 0;
+    padding: 0;
+    display: flex;
+    min-height: 100vh;
+    overflow-x: hidden;
+}
+
+/* Top Navigation */
+.top-nav {
+    position: fixed;
+    top: 0;
+    left: 260px;
+    right: 0;
+    height: 60px;
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    box-shadow: var(--shadow-sm);
+    z-index: 10;
+    transition: left 0.3s ease;
+}
+
+.top-nav.resized {
+    left: 60px;
+}
+
+.top-nav h2 {
+    margin: 0;
+    font-size: 1.25rem;
+    color: white;
+    font-weight: 600;
+}
+
+.filter-container {
+    flex-grow: 1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 20px;
+    flex-wrap: wrap;
+}
+
+.filter-container select,
+.filter-container input {
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    font-size: 0.85rem;
+    background: white;
+    cursor: pointer;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.filter-container select:focus,
+.filter-container input:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 5px rgba(64, 168, 103, 0.3);
+    outline: none;
+}
+
+.filter-container select {
+    appearance: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='gray'><path d='M5 7l5 5 5-5H5z'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 12px;
+    padding-right: 30px;
+}
+
+#dateRange {
+    display: none;
+    gap: 10px;
+}
+
+#dateRange label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.85rem;
+    color: white;
+}
+
+.filter-container button {
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 0.85rem;
+    box-shadow: var(--shadow-sm);
+    transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.filter-container button:hover {
+    background: var(--primary-dark);
+    transform: translateY(-2px);
+}
+
+.filter-container button:focus {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+}
+
+
+.toggle-btn {
+    background: none;
+    border: none;
+    font-size: 1.25rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    margin-bottom: 20px;
+    display: block;
+}
+
+.toggle-btn:hover,
+.toggle-btn:focus {
+    color: var(--primary-color);
+    outline: none;
+}
+
+
+/* Main Content */
+.main-content {
+    flex: 1;
+    margin-left: 260px;
+    padding: 80px 20px 20px;
+    transition: margin-left 0.3s ease;
+    overflow-y: auto;
+}
+
+.sidebar.minimized ~ .main-content {
+    margin-left: 60px;
+}
+
+.main-content h2 {
+    text-align: center;
+    color: var(--secondary-color);
+    margin: 0 0 20px;
+    font-size: 1.5rem;
+    font-weight: 600;
+}
+
+/* Print Header */
+#print-header {
+    display: none;
+    text-align: center;
+    padding: 20px 0;
+}
+
+#print-header h2 {
+    font-size: 1.25rem;
+    color: var(--secondary-color);
+    margin: 10px 0;
+}
+
+/* Chart Container */
+.chart-container {
+    width: 80%;
+    max-width: 900px;
+    margin: 30px auto;
+    padding: 25px;
+    background: var(--card-bg);
+    border-radius: var(--border-radius);
+    box-shadow: var(--shadow-md);
+    contain: layout;
+}
+
+#fileActivityChart {
+    width: 100%;
+    max-height: 400px;
+}
+
+.chart-actions {
+    display: flex;
+    justify-content: center;
+    gap: 15px;
+    margin-top: 20px;
+    flex-wrap: wrap;
+}
+
+.chart-actions button {
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 0.875rem;
+    box-shadow: var(--shadow-sm);
+    transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.chart-actions button:hover {
+    background: var(--primary-dark);
+    transform: translateY(-2px);
+}
+
+.chart-actions button:focus {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+}
+
+/* Files Table */
+.files-table {
+    width: 80%;
+    max-width: 900px;
+    margin: 30px auto;
+    overflow-x: auto;
+}
+
+.files-table h3 {
+    font-size: 1.25rem;
+    color: var(--secondary-color);
+    margin: 0 0 15px;
+    border-bottom: 2px solid var(--primary-color);
+    padding-bottom: 5px;
+}
+
+.files-table table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--card-bg);
+    box-shadow: var(--shadow-md);
+    border-radius: var(--border-radius);
+    overflow: hidden;
+}
+
+.files-table th,
+.files-table td {
+    padding: 15px;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 0.875rem;
+    color: var(--text-color);
+}
+
+.files-table th {
+    background: var(--primary-color);
+    color: white;
+    font-weight: 600;
+}
+
+.files-table td {
+    word-break: break-word;
+    max-width: 200px;
+}
+
+.files-table tr:hover {
+    background: #f5f5f5;
+}
+
+.files-table tr:last-child td {
+    border-bottom: none;
+}
+
+/* Table Controls */
+.table-controls {
+    display: flex;
+    justify-content: center;
+    gap: 15px;
+    margin: 20px 0;
+    flex-wrap: wrap;
+}
+
+.table-controls select {
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    background: var(--card-bg);
+    font-size: 0.85rem;
+    cursor: pointer;
+    min-width: 150px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    appearance: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='gray'><path d='M5 7l5 5 5-5H5z'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 12px;
+    padding-right: 30px;
+}
+
+.table-controls select:hover {
+    border-color: var(--primary-color);
+}
+
+.table-controls select:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 5px rgba(64, 168, 103, 0.3);
+    outline: none;
+}
+
+.table-controls option {
+    color: var(--text-color);
+    background: var(--card-bg);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .top-nav {
+        left: 60px;
+    }
+
+    .main-content {
+        margin-left: 60px;
+    }
+
+    .chart-container,
+    .files-table {
+        width: 90%;
+    }
+
+    .files-table table {
+        font-size: 0.75rem;
+    }
+
+    .files-table th,
+    .files-table td {
+        padding: 10px;
+    }
+
+    .table-controls select {
+        min-width: 120px;
+    }
+}
+
+@media (max-width: 480px) {
+    .top-nav {
+        left: 0;
+    }
+
+    .main-content {
+        margin-left: 0;
+        padding: 70px 10px 10px;
+    }
+
+    .chart-container,
+    .files-table {
+        width: 100%;
+    }
+
+    .filter-container {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .filter-container select,
+    .filter-container input,
+    .filter-container button {
+        width: 100%;
+    }
+
+    #dateRange {
+        flex-direction: column;
+        gap: 5px;
+    }
+
+    .table-controls {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .table-controls select {
+        width: 100%;
+    }
+
+    .chart-actions {
+        flex-direction: column;
+    }
+
+    .chart-actions button {
+        width: 100%;
+    }
+}

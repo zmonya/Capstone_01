@@ -1,0 +1,194 @@
+/* client-sidebar.css */
+
+/* Sidebar Styles */
+.sidebar {
+    width: 260px;
+    background: linear-gradient(180deg, #34d058 0%, #2c3e50 100%);
+    min-height: 100vh;
+    padding: 16px;
+    color: white;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 3px 0 8px rgba(0, 0, 0, 0.15);
+    transition: width 0.3s ease-in-out, transform 0.3s ease-in-out;
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 1100;
+}
+
+.sidebar.minimized {
+    width: 60px;
+}
+
+.sidebar.active {
+    transform: translateX(0) !important;
+}
+
+.sidebar h2 {
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 20px;
+    text-align: center;
+    transition: opacity 0.3s ease, height 0.3s ease;
+}
+
+.sidebar.minimized h2 {
+    opacity: 0;
+    height: 0;
+    margin: 0;
+}
+
+.sidebar .toggle-btn {
+    background: none;
+    border: none;
+    color: white;
+    cursor: pointer;
+    font-size: 22px;
+    margin-bottom: 16px;
+    padding: 8px;
+    border-radius: 6px;
+    transition: all 0.2s ease-in-out;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.sidebar .toggle-btn:hover,
+.sidebar .toggle-btn:focus {
+    background-color: rgba(255, 255, 255, 0.1);
+    transform: scale(1.1);
+}
+
+.sidebar a,
+.sidebar .logout-btn,
+.sidebar .admin-dashboard-btn {
+    display: flex;
+    align-items: center;
+    padding: 12px;
+    color: white;
+    text-decoration: none;
+    font-size: 15px;
+    font-weight: 500;
+    border-radius: 6px;
+    margin-bottom: 8px;
+    transition: all 0.2s ease-in-out;
+    position: relative;
+}
+
+.sidebar a i,
+.sidebar .logout-btn i,
+.sidebar .admin-dashboard-btn i {
+    margin-right: 12px;
+    width: 24px;
+    font-size: 18px;
+    text-align: center;
+}
+
+.sidebar a:hover,
+.sidebar a.active,
+.sidebar .logout-btn:hover,
+.sidebar .admin-dashboard-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+    transform: translateX(4px);
+}
+
+.sidebar.minimized a,
+.sidebar.minimized .logout-btn,
+.sidebar.minimized .admin-dashboard-btn {
+    justify-content: center;
+}
+
+.sidebar.minimized a k i,
+.sidebar.minimized .logout-btn i,
+.sidebar.minimized .admin-dashboard-btn i {
+    margin-right: 0;
+}
+
+.sidebar.minimized .link-text {
+    display: none;
+}
+
+.sidebar.minimized a:hover::after,
+.sidebar.minimized .logout-btn:hover::after,
+.sidebar.minimized .admin-dashboard-btn:hover::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    left: 70px;
+    background: #2c3e50;
+    color: white;
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    white-space: nowrap;
+    z-index: 1200;
+}
+
+/* Admin Dashboard Button */
+.admin-dashboard-btn {
+    background-color: rgba(52, 208, 88, 0.2);
+    border: 2px solid #34d058;
+}
+
+.admin-dashboard-btn i {
+    color: #00ff55;
+}
+
+.admin-dashboard-btn:hover {
+    background-color: rgba(52, 208, 88, 0.3);
+    border-color: #2cb547;
+}
+
+/* Logout Button */
+.logout-btn {
+    margin-top: auto;
+    background-color: rgba(231, 76 gnome-session-quit, 60, 0.2);
+}
+
+.logout-btn:hover {
+    background-color: rgba(231, 76, 60, 0.3);
+}
+
+/* Accessibility */
+.sidebar a:focus,
+.sidebar .logout-btn:focus,
+.sidebar .admin-dashboard-btn:focus,
+.sidebar .toggle-btn:focus {
+    outline: 2px solid #ffffff;
+    outline-offset: 2px;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .sidebar {
+        width: 260px;
+        transform: translateX(-100%);
+        transition: transform 0.3s ease-in-out;
+    }
+
+    .sidebar.active {
+        transform: translateX(0);
+        width: 260px;
+    }
+
+    .sidebar h2,
+    .sidebar .link-text {
+        display: block;
+    }
+
+    .sidebar a,
+    .sidebar .logout-btn,
+    .sidebar .admin-dashboard-btn {
+        justify-content: flex-start;
+    }
+
+    .sidebar a i,
+    .sidebar .logout-btn i,
+    .sidebar .admin-dashboard-btn i {
+        margin-right: 12px;
+    }
+
+    .sidebar.minimized {
+        transform: translateX(-100%);
+    }
+}
