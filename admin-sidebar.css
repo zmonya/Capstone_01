@@ -1,0 +1,212 @@
+/* Admin Sidebar Styles */
+.sidebar {
+    width: 260px; /* Same width as client sidebar */
+    background: linear-gradient(220deg, #1a1a1a, #2c3e50); /* Dark, sophisticated gradient */
+    height: 100vh;
+    padding: 20px;
+    color: #ffffff;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 2px 0 10px rgba(0, 0, 0, 0.3); /* Stronger shadow for depth */
+    transition: width 0.3s ease;
+}
+
+.sidebar h2 {
+    text-align: center;
+    font-size: 24px;
+    margin-bottom: 20px;
+    color: #50c878; /* Highlight title with a green color */
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+
+.sidebar .toggle-btn {
+    background-color: transparent;
+    border: none;
+    color: #ffffff;
+    cursor: pointer;
+    font-size: 24px;
+    margin-bottom: 20px;
+    transition: transform 0.2s ease, color 0.2s ease;
+}
+
+.sidebar .toggle-btn:hover {
+    transform: scale(1.1);
+    color: #50c878; /* Green hover effect */
+}
+
+.sidebar a {
+    display: flex;
+    align-items: center;
+    padding: 12px;
+    color: #ffffff;
+    text-decoration: none;
+    font-size: 16px;
+    transition: all 0.3s ease;
+    border-radius: 4px; /* Slightly rounded corners */
+    margin-bottom: 8px;
+    background: rgba(255, 255, 255, 0.05); /* Subtle background for links */
+    position: relative; /* For the active border */
+}
+
+.sidebar a i {
+    margin-right: 12px;
+    width: 24px; /* Fixed width for icons */
+    color: #50c878; /* Green icons for contrast */
+    transition: color 0.3s ease;
+}
+
+/* Active Link Effect */
+.sidebar a.active {
+    background: rgba(255, 255, 255, 0.1); /* Slightly brighter background */
+    border-left: 4px solid #50c878; /* Left border highlight */
+    padding-left: 8px; /* Adjust padding for the border */
+}
+
+.sidebar a.active i {
+    color: #ffffff; /* White icons for active links */
+}
+
+/* Hover Effect */
+.sidebar a:hover {
+    background: rgba(255, 255, 255, 0.1); /* Subtle hover effect */
+}
+
+.sidebar a:hover i {
+    color: #ffffff; /* White icons on hover */
+}
+
+/* Minimized State */
+.sidebar.minimized {
+    width: 60px; /* Minimized width */
+}
+
+.sidebar.minimized .link-text {
+    display: none; /* Hide text in minimized state */
+}
+
+.sidebar.minimized a {
+    justify-content: center; /* Center icons when minimized */
+    padding: 12px 0; /* Adjust padding for minimized state */
+}
+
+.sidebar.minimized a i {
+    margin-right: 0; /* Remove margin for icons */
+}
+
+/* Logout Button */
+.logout-btn {
+    text-align: center;
+    border-radius: 8px;
+    padding: 12px;
+    color: #ffffff;
+    font-size: 16px;
+    transition: background-color 0.3s ease, transform 0.2s ease;
+    display: flex; /* Ensure it behaves like other links */
+    align-items: center; /* Align icon and text */
+    justify-content: flex-start; /* Align to the left by default */
+}
+
+.logout-btn:hover {
+    transform: translateY(-2px); /* Slight lift on hover */
+}
+
+/* Minimized State for Logout Button */
+.sidebar.minimized .logout-btn {
+    justify-content: center; /* Center icon when minimized */
+}
+
+.sidebar.minimized .logout-btn .link-text {
+    display: none; /* Hide text in minimized state */
+}
+
+.sidebar.minimized .logout-btn i {
+    margin-right: 0; /* Remove margin for icons */
+}
+
+/* Admin Mode Button Styles */
+.admin-mode-btn {
+    display: flex;
+    align-items: center;
+    padding: 12px;
+    color: white;
+    background-color: rgba(255, 255, 255, 0.1);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 16px;
+    transition: background 0.3s;
+    margin-bottom: 10px;
+    width: 100%;
+    text-align: left;
+}
+
+.admin-mode-btn i {
+    margin-right: 12px;
+    width: 24px; /* Fixed width for icons */
+}
+
+.admin-mode-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+/* Hide Admin Mode Button in Minimized Sidebar */
+.sidebar.minimized .admin-mode-btn .link-text {
+    display: none;
+}
+
+.sidebar.minimized .admin-mode-btn {
+    justify-content: center;
+}
+
+.sidebar.minimized .admin-mode-btn i {
+    margin-right: 0;
+}
+/* Client Button Styles */
+.client-btn {
+    display: flex;
+    align-items: center;
+    padding: 12px;
+    color: #ffffff;
+    background-color: rgba(80, 200, 120, 0.2); /* Slightly brighter green background */
+    border: 2px solid #50c878; /* Green border for distinction */
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 16px;
+    transition: all 0.3s ease;
+    margin-bottom: 10px;
+    width: 100%;
+    text-align: left;
+    text-decoration: none;
+    box-sizing: border-box; /* Ensure border is included in width */
+}
+
+.client-btn i {
+    margin-right: 12px;
+    width: 24px; /* Fixed width for icons */
+    color: #50c878; /* Green icons for contrast */
+    transition: color 0.3s ease;
+}
+
+.client-btn:hover {
+    background-color: rgba(80, 200, 120, 0.3); /* Brighter green on hover */
+    border-color: #40a867; /* Darker green border on hover */
+    transform: translateX(5px); /* Slight horizontal movement on hover */
+}
+
+.client-btn:hover i {
+    color: #ffffff; /* White icons on hover */
+}
+
+/* Minimized State for Client Button */
+.sidebar.minimized .client-btn {
+    justify-content: center; /* Center icon when minimized */
+}
+
+.sidebar.minimized .client-btn .link-text {
+    display: none; /* Hide text in minimized state */
+}
+
+.sidebar.minimized .client-btn i {
+    margin-right: 0; /* Remove margin for icons */
+}
