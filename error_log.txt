@@ -1,7 +1,0 @@
-[2025-04-06 13:57:08] Error saving file details: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'arc-hive.file_departments' doesn't exist | Trace: #0 C:\xampp\htdocs\ARC-HIVE-DEFENSE\save_file_details.php(97): PDOStatement->execute(Array)
-#1 {main}
-[2025-04-06 14:05:52] Error saving file details: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'arc-hive.file_departments' doesn't exist | Trace: #0 C:\xampp\htdocs\ARC-HIVE-DEFENSE\save_file_details.php(97): PDOStatement->execute(Array)
-#1 {main}
-[2025-04-06 16:42:07] Department ID missing
-[2025-04-06 16:44:13] Department ID missing for user 11
-[2025-04-06 16:44:13] Document type missing
