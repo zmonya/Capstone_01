@@ -3,10 +3,11 @@ body.department-management {
     font-family: 'Montserrat', Arial, sans-serif;
     background-color: #f4f7f9;
     color: #34495e;
+    line-height: 1.4;
 }
 
 .main-content {
-    padding: 30px;
+    padding: 20px 15px;
     transition: margin-left 0.3s ease;
     max-width: 1200px;
     margin: 0 auto;
@@ -22,7 +23,7 @@ body.department-management {
 
 /* Page Header */
 .page-header {
-    margin-bottom: 30px;
+    margin-bottom: 15px;
     text-align: left;
 }
 
@@ -30,7 +31,7 @@ body.department-management {
     font-size: 28px;
     font-weight: 700;
     color: #2c3e50;
-    margin: 0 0 10px;
+    margin: 0 0 5px;
 }
 
 .page-header p {
@@ -43,14 +44,14 @@ body.department-management {
 .action-buttons-container {
     display: flex;
     gap: 15px;
-    margin-bottom: 30px;
+    margin-bottom: 20px;
 }
 
 .open-modal-btn {
     background: linear-gradient(45deg, #50c878, #2ecc71);
     color: white;
     border: none;
-    padding: 12px 24px;
+    padding: 10px 20px;
     border-radius: 6px;
     font-size: 16px;
     font-weight: 600;
@@ -80,7 +81,7 @@ body.department-management {
 .error-message,
 .success-message {
     padding: 12px;
-    margin-bottom: 20px;
+    margin-bottom: 15px;
     border-radius: 6px;
     font-size: 14px;
     display: flex;
@@ -114,17 +115,17 @@ body.department-management {
     background: #fff;
     border-radius: 10px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-    padding: 20px;
-    margin-bottom: 30px;
+    padding: 15px;
+    margin-bottom: 20px;
 }
 
 .table-container h2 {
     font-size: 22px;
     font-weight: 600;
     color: #2c3e50;
-    margin: 0 0 20px;
+    margin: 0 0 15px;
     border-bottom: 2px solid #50c878;
-    padding-bottom: 8px;
+    padding-bottom: 6px;
 }
 
 .no-data {
@@ -136,7 +137,7 @@ body.department-management {
 
 /* Department Section */
 .dept-section {
-    margin-bottom: 20px;
+    margin-bottom: 10px;
     border: 1px solid #ecf0f1;
     border-radius: 8px;
     background: #fff;
@@ -145,7 +146,7 @@ body.department-management {
 
 .dept-header {
     background: #f5f6f7;
-    padding: 15px 20px;
+    padding: 10px 15px;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -329,7 +330,7 @@ body.department-management {
 
 .modal-content {
     background: #fff;
-    padding: 25px;
+    padding: 20px;
     border-radius: 10px;
     max-width: 500px;
     width: 90%;
@@ -346,7 +347,7 @@ body.department-management {
 .modal-content h2 {
     font-size: 24px;
     color: #2c3e50;
-    margin: 0 0 20px;
+    margin: 0 0 15px;
     text-align: center;
 }
 
@@ -474,7 +475,7 @@ body.department-management {
 /* Responsive Design */
 @media (max-width: 768px) {
     .main-content {
-        padding: 20px;
+        padding: 15px;
     }
 
     .main-content.sidebar-expanded,
@@ -548,5 +549,51 @@ body.department-management {
     .dropdown-item .delete-btn {
         padding: 3px 6px;
         font-size: 10px;
+    }
+}
+
+/* Print Styles */
+@media print {
+    * {
+        margin: 0 !important;
+        padding: 0 !important;
+        box-shadow: none !important;
+        background: transparent !important;
+        color: black !important;
+    }
+
+    body.department-management {
+        background: white !important;
+        color: black !important;
+    }
+
+    .main-content {
+        margin: 0 !important;
+        padding: 0 !important;
+        max-width: 100% !important;
+    }
+
+    .dept-section,
+    .table-container,
+    .dept-header,
+    .dropdown-content {
+        page-break-inside: avoid !important;
+        border: none !important;
+        background: transparent !important;
+        margin-bottom: 10px !important;
+        padding: 0 !important;
+    }
+
+    .action-buttons,
+    .dropdown,
+    .modal,
+    .open-modal-btn,
+    .error-message,
+    .success-message {
+        display: none !important;
+    }
+
+    ::-webkit-scrollbar {
+        display: none !important;
     }
 }
