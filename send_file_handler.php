@@ -12,8 +12,25 @@ if (empty($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_toke
     exit;
 }
 
+error_log("Send file handler called with POST data: " . json_encode($_POST));
+
 $fileId = filter_var($_POST['file_id'], FILTER_SANITIZE_NUMBER_INT);
-$recipients = $_POST['recipients'] ? array_map('filter_var', $_POST['recipients'], array_fill(0, count($_POST['recipients']), FILTER_SANITIZE_STRING)) : [];
+$recipientsRaw = $_POST['recipients'] ?? [];
+$recipients = [];
+
+foreach ($recipientsRaw as $recipient) {
+    $recipient = filter_var($recipient, FILTER_SANITIZE_STRING);
+    if (strpos($recipient, ':') === false) {
+        error_log("Skipping malformed recipient: $recipient");
+        continue; // skip malformed recipient
+    }
+    list($type, $id) = explode(':', $recipient, 2);
+    if (!in_array($type, ['user', 'department']) || !ctype_digit($id)) {
+        error_log("Skipping invalid recipient type or id: $recipient");
+        continue; // skip invalid recipient
+    }
+    $recipients[] = ['type' => $type, 'id' => (int)$id];
+}
 
 try {
     $pdo->beginTransaction();
@@ -23,13 +40,13 @@ try {
         throw new Exception('Invalid file or access denied.');
     }
 
-    foreach ($recipients as $recipient) {
-        list($type, $id) = explode(':', $recipient);
-        $userId = ($type === 'user') ? $id : null;
-        $deptId = ($type === 'department') ? $id : null;
+    $insertStmt = $pdo->prepare("INSERT INTO transaction (File_id, User_id, Users_Department_id, Transaction_type, Transaction_status, Time, Message) VALUES (?, ?, ?, 2, 'pending', NOW(), 'File sent for review')");
 
-        $stmt = $pdo->prepare("INSERT INTO transaction (File_id, User_id, Users_Department_id, Transaction_type, Transaction_status, Time, Massage) VALUES (?, ?, ?, 2, 'pending', NOW(), 'File sent for review')");
-        $stmt->execute([$fileId, $userId, $deptId]);
+    foreach ($recipients as $recipient) {
+        $userId = ($recipient['type'] === 'user') ? $recipient['id'] : null;
+        $deptId = ($recipient['type'] === 'department') ? $recipient['id'] : null;
+        error_log("Inserting transaction for file $fileId to user $userId or department $deptId");
+        $insertStmt->execute([$fileId, $userId, $deptId]);
     }
 
     logActivity($_SESSION['user_id'], 2, "Sent file $fileId to " . count($recipients) . " recipients");
@@ -38,5 +55,5 @@ try {
 } catch (Exception $e) {
     $pdo->rollBack();
     error_log("Send file error: " . $e->getMessage());
-    echo json_encode(['success' => false, 'message' => 'Failed to send file.']);
+    echo json_encode(['success' => false, 'message' => 'Failed to send file: ' . $e->getMessage()]);
 }
