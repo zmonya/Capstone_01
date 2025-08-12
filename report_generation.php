@@ -1,4 +1,4 @@
-<?php
+ <?php
 session_start();
 require 'db_connection.php';
 
@@ -113,28 +113,38 @@ function fetchAllFiles($pdo, $userId)
 function fetchFileActivity($pdo, $userId)
 {
     $stmt = $pdo->prepare("
-        SELECT DATE(COALESCE(ft.time_sent, ft.time_accepted, ar.time_requested)) AS activity_day,
-               COUNT(DISTINCT CASE 
-                   WHEN ft.recipient_id = ? AND ft.status = 'pending' THEN ft.file_id 
-               END) AS incoming_pending,
-               COUNT(DISTINCT CASE 
-                   WHEN ft.recipient_id = ? AND ft.status = 'accepted' THEN ft.file_id 
-               END) AS incoming_accepted,
-               COUNT(DISTINCT CASE 
-                   WHEN ft.sender_id = ? AND ft.status = 'pending' THEN ft.file_id 
-               END) AS outgoing_pending,
-               COUNT(DISTINCT CASE 
-                   WHEN ft.sender_id = ? AND ft.status = 'accepted' THEN ft.file_id 
-               END) AS outgoing_accepted
-        FROM files f
-        LEFT JOIN file_transfers ft ON f.id = ft.file_id
-        LEFT JOIN access_requests ar ON f.id = ar.file_id
-        WHERE f.is_deleted = 0
-        AND (ft.sender_id = ? OR ft.recipient_id = ? OR ar.requester_id = ?)
-        GROUP BY activity_day 
+        SELECT 
+            COALESCE(activity_date, CURDATE()) as activity_day,
+            COALESCE(incoming_pending, 0) as incoming_pending,
+            COALESCE(incoming_accepted, 0) as incoming_accepted,
+            COALESCE(outgoing_pending, 0) as outgoing_pending,
+            COALESCE(outgoing_accepted, 0) as outgoing_accepted
+        FROM (
+            SELECT 
+                DATE(COALESCE(ft.time_sent, ft.time_accepted, ar.time_requested, NOW())) as activity_date,
+                SUM(CASE WHEN ft.recipient_id = ? AND ft.status = 'pending' THEN 1 ELSE 0 END) as incoming_pending,
+                SUM(CASE WHEN ft.recipient_id = ? AND ft.status = 'accepted' THEN 1 ELSE 0 END) as incoming_accepted,
+                SUM(CASE WHEN ft.sender_id = ? AND ft.status = 'pending' THEN 1 ELSE 0 END) as outgoing_pending,
+                SUM(CASE WHEN ft.sender_id = ? AND ft.status = 'accepted' THEN 1 ELSE 0 END) as outgoing_accepted
+            FROM (
+                SELECT CURDATE() - INTERVAL seq DAY as date_range
+                FROM (
+                    SELECT 0 as seq UNION SELECT 1 UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 
+                    UNION SELECT 5 UNION SELECT 6 UNION SELECT 7 UNION SELECT 8 UNION SELECT 9
+                    UNION SELECT 10 UNION SELECT 11 UNION SELECT 12 UNION SELECT 13 UNION SELECT 14
+                    UNION SELECT 15 UNION SELECT 16 UNION SELECT 17 UNION SELECT 18 UNION SELECT 19
+                    UNION SELECT 20 UNION SELECT 21 UNION SELECT 22 UNION SELECT 23 UNION SELECT 24
+                    UNION SELECT 25 UNION SELECT 26 UNION SELECT 27 UNION SELECT 28 UNION SELECT 29
+                ) as days
+            ) as date_series
+            LEFT JOIN file_transfers ft ON DATE(ft.time_sent) = date_range OR DATE(ft.time_accepted) = date_range
+            LEFT JOIN access_requests ar ON DATE(ar.time_requested) = date_range
+            WHERE date_range >= CURDATE() - INTERVAL 30 DAY
+            GROUP BY date_range
+        ) as activity_data
         ORDER BY activity_day ASC
     ");
-    $stmt->execute([$userId, $userId, $userId, $userId, $userId, $userId, $userId]);
+    $stmt->execute([$userId, $userId, $userId, $userId]);
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
@@ -175,28 +185,60 @@ function getFileIcon($fileName)
     }
 }
 
-// Fetch data
-$user = fetchUserDetails($pdo, $userId);
-$userDepartments = fetchUserDepartments($pdo, $userId);
-$recentFiles = fetchRecentFiles($pdo, $userId);
-$notificationLogs = fetchNotifications($pdo, $userId);
-$activityLogs = fetchActivityLogs($pdo, $userId);
-$files = fetchAllFiles($pdo, $userId);
-$inboundFiles = fetchFileActivity($pdo, $userId);
+// Handle request parameters
+$startDate = isset($_GET['start_date']) ? $_GET['start_date'] : date('Y-m-d', strtotime('-30 days'));
+$endDate = isset($_GET['end_date']) ? $_GET['end_date'] : date('Y-m-d');
+$departmentId = isset($_GET['department_id']) ? intval($_GET['department_id']) : null;
 
-// Prepare chart data
-$chartLabels = [];
-$inboundPendingData = [];
-$inboundAcceptedData = [];
-$outboundPendingData = [];
-$outboundAcceptedData = [];
+// Validate dates
+if (!strtotime($startDate) || !strtotime($endDate)) {
+    $startDate = date('Y-m-d', strtotime('-30 days'));
+    $endDate = date('Y-m-d');
+}
 
-foreach ($inboundFiles as $file) {
-    $chartLabels[] = $file['activity_day'];
-    $inboundPendingData[] = $file['incoming_pending'];
-    $inboundAcceptedData[] = $file['incoming_accepted'];
-    $outboundPendingData[] = $file['outgoing_pending'];
-    $outboundAcceptedData[] = $file['outgoing_accepted'];
+// Fetch data with error handling
+try {
+    $user = fetchUserDetails($pdo, $userId);
+    $userDepartments = fetchUserDepartments($pdo, $userId);
+    $recentFiles = fetchRecentFiles($pdo, $userId);
+    $notificationLogs = fetchNotifications($pdo, $userId);
+    $activityLogs = fetchActivityLogs($pdo, $userId);
+    $files = fetchAllFiles($pdo, $userId);
+    $inboundFiles = fetchFileActivity($pdo, $userId);
+
+    // Prepare chart data with fallback
+    $chartLabels = [];
+    $inboundPendingData = [];
+    $inboundAcceptedData = [];
+    $outboundPendingData = [];
+    $outboundAcceptedData = [];
+
+    if (!empty($inboundFiles)) {
+        foreach ($inboundFiles as $file) {
+            $chartLabels[] = $file['activity_day'];
+            $inboundPendingData[] = $file['incoming_pending'];
+            $inboundAcceptedData[] = $file['incoming_accepted'];
+            $outboundPendingData[] = $file['outgoing_pending'];
+            $outboundAcceptedData[] = $file['outgoing_accepted'];
+        }
+    } else {
+        // Provide default data if no results
+        $chartLabels = [date('Y-m-d')];
+        $inboundPendingData = [0];
+        $inboundAcceptedData = [0];
+        $outboundPendingData = [0];
+        $outboundAcceptedData = [0];
+    }
+} catch (Exception $e) {
+    // Log error and provide fallback data
+    error_log("Report generation error: " . $e->getMessage());
+    
+    // Provide empty/default data
+    $chartLabels = [date('Y-m-d')];
+    $inboundPendingData = [0];
+    $inboundAcceptedData = [0];
+    $outboundPendingData = [0];
+    $outboundAcceptedData = [0];
 }
 
 $inboundMovingAverage = calculateMovingAverage(array_map(function ($a, $b) {

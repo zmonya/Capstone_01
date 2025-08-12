@@ -60,20 +60,14 @@ function sanitizeHTML($data)
 }
 
 // Fetch admin details
-$adminStmt = executeQuery($pdo, "SELECT user_id, username, role FROM users WHERE user_id = ?", [$userId]);
+$adminStmt = executeQuery($pdo, "SELECT user_id, Username, Role FROM users WHERE user_id = ?", [$userId]);
 $admin = $adminStmt ? $adminStmt->fetch(PDO::FETCH_ASSOC) : null;
-
-if (!$admin) {
-    session_destroy();
-    header('Location: login.php');
-    exit();
-}
 
 // Fetch system statistics
 $totalUsersStmt = executeQuery($pdo, "SELECT COUNT(*) FROM users");
 $totalUsers = $totalUsersStmt ? $totalUsersStmt->fetchColumn() : 0;
 
-$totalFilesStmt = executeQuery($pdo, "SELECT COUNT(*) FROM files WHERE file_status != 'disposed'");
+$totalFilesStmt = executeQuery($pdo, "SELECT COUNT(*) FROM files WHERE File_status != 'disposed'");
 $totalFiles = $totalFilesStmt ? $totalFilesStmt->fetchColumn() : 0;
 
 $pendingRequestsStmt = executeQuery($pdo, "SELECT COUNT(*) FROM transactions WHERE transaction_status = 'pending' AND transaction_type = 'request'");
@@ -83,7 +77,7 @@ $incomingFilesStmt = executeQuery($pdo, "
     SELECT COUNT(*) AS incoming_count 
     FROM transactions t
     JOIN files f ON t.file_id = f.file_id
-    WHERE t.users_department_id IN (SELECT users_department_id FROM users_department WHERE user_id = ?) 
+    WHERE t.users_department_id IN (SELECT users_department_id FROM users_department WHERE User_id = ?) 
     AND t.transaction_status = 'pending' 
     AND t.transaction_type = 'send'", [$userId]);
 $incomingFiles = $incomingFilesStmt ? $incomingFilesStmt->fetchColumn() : 0;
@@ -99,16 +93,16 @@ $outgoingFiles = $outgoingFilesStmt ? $outgoingFilesStmt->fetchColumn() : 0;
 
 // Fetch pending requests details
 $pendingRequestsDetailsStmt = executeQuery($pdo, "
-    SELECT t.transaction_id, f.file_name, u.username AS requester_name, 
-           COALESCE(pd.department_name, d.department_name) AS requester_department,
-           CASE WHEN pd.department_id IS NOT NULL THEN d.department_name ELSE NULL END AS requester_subdepartment,
+    SELECT t.transaction_id, f.File_name, u.Username AS requester_name, 
+           COALESCE(d2.Department_name, d.Department_name) AS requester_department,
+           CASE WHEN d2.department_id IS NOT NULL THEN d.Department_name ELSE NULL END AS requester_subdepartment,
            f.physical_storage
     FROM transactions t
     JOIN files f ON t.file_id = f.file_id
     JOIN users u ON t.user_id = u.user_id
-    JOIN users_department ud ON u.user_id = ud.user_id
-    JOIN departments d ON ud.department_id = d.department_id
-    LEFT JOIN departments pd ON d.parent_department_id = pd.department_id
+    JOIN users_department ud ON u.user_id = ud.User_id
+    JOIN departments d ON ud.Department_id = d.department_id
+    LEFT JOIN departments d2 ON d.Parent_department_id = d2.department_id
     WHERE t.transaction_status = 'pending' AND t.transaction_type = 'request'
     GROUP BY t.transaction_id");
 $pendingRequestsDetails = $pendingRequestsDetailsStmt ? $pendingRequestsDetailsStmt->fetchAll(PDO::FETCH_ASSOC) : [];
@@ -116,44 +110,42 @@ $pendingRequestsDetails = $pendingRequestsDetailsStmt ? $pendingRequestsDetailsS
 // Fetch file upload trends (Last 7 Days)
 $fileUploadTrendsStmt = executeQuery($pdo, "
     SELECT 
-        f.file_name AS document_name,
-        dt.field_label AS document_type,
-        f.upload_date AS upload_date,
-        u.username AS uploader_name,
-        COALESCE(pd.department_name, d.department_name) AS uploader_department,
-        CASE WHEN pd.department_id IS NOT NULL THEN d.department_name ELSE NULL END AS uploader_subdepartment,
-        td.department_name AS target_department_name
+        f.File_name AS document_name,
+        dt.type_name AS document_type,
+        f.Upload_date AS upload_date,
+        u.Username AS uploader_name,
+        COALESCE(d2.Department_name, d.Department_name) AS uploader_department,
+        CASE WHEN d2.department_id IS NOT NULL THEN d.Department_name ELSE NULL END AS uploader_subdepartment,
+        td.Department_name AS target_department_name
     FROM files f
-    LEFT JOIN document_types dt ON f.document_type_id = dt.document_type_id
-    LEFT JOIN users u ON f.user_id = u.user_id
-    LEFT JOIN users_department uda ON u.user_id = uda.user_id
-    LEFT JOIN departments d ON uda.department_id = d.department_id
-    LEFT JOIN departments pd ON d.parent_department_id = pd.department_id
+    LEFT JOIN document_types dt ON f.Document_type_id = dt.document_type_id
+    LEFT JOIN users u ON f.User_id = u.user_id
+    LEFT JOIN users_department uda ON u.user_id = uda.User_id
+    LEFT JOIN departments d ON uda.Department_id = d.department_id
+    LEFT JOIN departments d2 ON d.Parent_department_id = d2.department_id
     LEFT JOIN transactions t ON f.file_id = t.file_id AND t.transaction_type = 'send'
     LEFT JOIN users_department tud ON t.users_department_id = tud.users_department_id
-    LEFT JOIN departments td ON tud.department_id = td.department_id
-    WHERE f.upload_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
-    AND f.file_status != 'disposed'
-    ORDER BY f.upload_date ASC");
+    LEFT JOIN departments td ON tud.Department_id = td.department_id
+    WHERE f.Upload_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+    AND f.File_status != 'disposed'
+    ORDER BY f.Upload_date ASC");
 $fileUploadTrends = $fileUploadTrendsStmt ? $fileUploadTrendsStmt->fetchAll(PDO::FETCH_ASSOC) : [];
 
 // Fetch file distribution by document type
 $fileDistributionByTypeStmt = executeQuery($pdo, "
     SELECT 
-        f.file_name AS document_name,
-        dt.field_label AS document_type,
-        us.username AS sender_name,
-        ur.username AS receiver_name,
+        f.File_name AS document_name,
+        dt.type_name AS document_type,
+        us.Username AS sender_name,
+        ur.Username AS receiver_name,
         t.transaction_time AS time_sent,
         t2.transaction_time AS time_received,
-        uq.username AS requester_name,
-        uo.username AS owner_name,
-        t3.transaction_time AS time_requested,
-        t4.transaction_time AS time_approved,
-        COALESCE(pd.department_name, d.department_name) AS department_name,
-        CASE WHEN pd.department_id IS NOT NULL THEN d.department_name ELSE NULL END AS sub_department_name
+        uq.Username AS requester_name,
+        uo.Username AS owner_name,
+        COALESCE(d2.Department_name, d.Department_name) AS department_name,
+        CASE WHEN d2.department_id IS NOT NULL THEN d.Department_name ELSE NULL END AS sub_department_name
     FROM files f
-    JOIN document_types dt ON f.document_type_id = dt.document_type_id
+    LEFT JOIN document_types dt ON f.Document_type_id = dt.document_type_id
     LEFT JOIN transactions t ON f.file_id = t.file_id AND t.transaction_type = 'send'
     LEFT JOIN users us ON t.user_id = us.user_id
     LEFT JOIN transactions t2 ON f.file_id = t2.file_id AND t2.transaction_type = 'accept'
@@ -161,21 +153,21 @@ $fileDistributionByTypeStmt = executeQuery($pdo, "
     LEFT JOIN transactions t3 ON f.file_id = t3.file_id AND t3.transaction_type = 'request'
     LEFT JOIN users uq ON t3.user_id = uq.user_id
     LEFT JOIN transactions t4 ON f.file_id = t4.file_id AND t4.transaction_type = 'accept'
-    LEFT JOIN users uo ON f.user_id = uo.user_id
-    LEFT JOIN users_department ud ON uo.user_id = ud.user_id
-    LEFT JOIN departments d ON ud.department_id = d.department_id
-    LEFT JOIN departments pd ON d.parent_department_id = pd.department_id");
+    LEFT JOIN users uo ON f.User_id = uo.user_id
+    LEFT JOIN users_department ud ON uo.user_id = ud.User_id
+    LEFT JOIN departments d ON ud.Department_id = d.department_id
+    LEFT JOIN departments d2 ON d.Parent_department_id = d2.department_id");
 $fileDistribution = $fileDistributionByTypeStmt ? $fileDistributionByTypeStmt->fetchAll(PDO::FETCH_ASSOC) : [];
 
 // Fetch users per department
 $usersPerDepartmentStmt = executeQuery($pdo, "
     SELECT 
-        COALESCE(pd.department_name, d.department_name) AS department_name,
-        COUNT(DISTINCT ud.user_id) AS user_count
+        COALESCE(d2.Department_name, d.Department_name) AS department_name,
+        COUNT(DISTINCT ud.User_id) AS user_count
     FROM departments d
-    LEFT JOIN departments pd ON d.parent_department_id = pd.department_id
-    LEFT JOIN users_department ud ON d.department_id = ud.department_id
-    WHERE d.department_type IN ('college', 'office')
+    LEFT JOIN departments d2 ON d.Parent_department_id = d2.department_id
+    LEFT JOIN users_department ud ON d.department_id = ud.Department_id
+    WHERE d.Department_type IN ('college', 'office')
     GROUP BY d.department_id
     ORDER BY department_name");
 $usersPerDepartment = $usersPerDepartmentStmt ? $usersPerDepartmentStmt->fetchAll(PDO::FETCH_ASSOC) : [];
@@ -183,17 +175,17 @@ $usersPerDepartment = $usersPerDepartmentStmt ? $usersPerDepartmentStmt->fetchAl
 // Fetch document copies details
 $documentCopiesStmt = executeQuery($pdo, "
     SELECT 
-        f.file_name,
+        f.File_name,
         COUNT(DISTINCT c.file_id) AS copy_count,
-        GROUP_CONCAT(DISTINCT COALESCE(pd.department_name, d.department_name)) AS offices_with_copy,
+        GROUP_CONCAT(DISTINCT COALESCE(d2.Department_name, d.Department_name)) AS offices_with_copy,
         GROUP_CONCAT(DISTINCT c.physical_storage) AS physical_duplicates
     FROM files f
-    LEFT JOIN files c ON f.file_id = c.parent_file_id
+    LEFT JOIN files c ON f.file_id = c.Parent_file_id
     LEFT JOIN transactions t ON c.file_id = t.file_id AND t.transaction_type IN ('send', 'accept')
     LEFT JOIN users_department ud ON t.users_department_id = ud.users_department_id
-    LEFT JOIN departments d ON ud.department_id = d.department_id
-    LEFT JOIN departments pd ON d.parent_department_id = pd.department_id
-    WHERE f.file_status != 'disposed'
+    LEFT JOIN departments d ON ud.Department_id = d.department_id
+    LEFT JOIN departments d2 ON d.Parent_department_id = d2.department_id
+    WHERE f.File_status != 'disposed'
     GROUP BY f.file_id");
 $documentCopies = $documentCopiesStmt ? $documentCopiesStmt->fetchAll(PDO::FETCH_ASSOC) : [];
 
@@ -204,16 +196,16 @@ $retrievalHistoryStmt = executeQuery($pdo, "
         t.transaction_type AS type,
         t.transaction_status AS status,
         t.transaction_time AS time,
-        u.username AS user_name,
-        f.file_name,
-        COALESCE(pd.department_name, d.department_name) AS department_name,
+        u.Username AS user_name,
+        f.File_name,
+        COALESCE(d2.Department_name, d.Department_name) AS department_name,
         f.physical_storage
     FROM transactions t
     JOIN files f ON t.file_id = f.file_id
     JOIN users u ON t.user_id = u.user_id
     JOIN users_department ud ON t.users_department_id = ud.users_department_id
-    JOIN departments d ON ud.department_id = d.department_id
-    LEFT JOIN departments pd ON d.parent_department_id = pd.department_id
+    JOIN departments d ON ud.Department_id = d.department_id
+    LEFT JOIN departments d2 ON d.Parent_department_id = d2.department_id
     WHERE t.transaction_type IN ('request', 'send', 'accept')
     ORDER BY t.transaction_time DESC");
 $retrievalHistory = $retrievalHistoryStmt ? $retrievalHistoryStmt->fetchAll(PDO::FETCH_ASSOC) : [];
@@ -223,16 +215,16 @@ $accessHistoryStmt = executeQuery($pdo, "
     SELECT 
         t.transaction_id,
         t.transaction_time AS time,
-        u.username AS user_name,
-        f.file_name,
+        u.Username AS user_name,
+        f.File_name,
         t.transaction_type AS type,
-        COALESCE(pd.department_name, d.department_name) AS department_name
+        COALESCE(d2.Department_name, d.Department_name) AS department_name
     FROM transactions t
     JOIN files f ON t.file_id = f.file_id
     JOIN users u ON t.user_id = u.user_id
     JOIN users_department ud ON t.users_department_id = ud.users_department_id
-    JOIN departments d ON ud.department_id = d.department_id
-    LEFT JOIN departments pd ON d.parent_department_id = pd.department_id
+    JOIN departments d ON ud.Department_id = d.department_id
+    LEFT JOIN departments d2 ON d.Parent_department_id = d2.department_id
     WHERE t.transaction_type = 'accept'
     ORDER BY t.transaction_time DESC");
 $accessHistory = $accessHistoryStmt ? $accessHistoryStmt->fetchAll(PDO::FETCH_ASSOC) : [];
@@ -288,16 +280,13 @@ $accessHistory = $accessHistoryStmt ? $accessHistoryStmt->fetchAll(PDO::FETCH_AS
         <a href="backup.php">
             <i class="fas fa-file-alt"></i>
             <span class="link-text">System Backup</span>
-
-
         <a href="logout.php" class="logout-btn">
             <i class="fas fa-sign-out-alt"></i>
             <span class="link-text">Logout</span>
         </a>
     </div>
     <div class="main-content">
-        <h2>Welcome, <?php echo sanitizeHTML($admin['username']); ?>!</h2>
-        <div class="admin-stats">
+<h2>Welcome, <?php echo sanitizeHTML($admin['Username']); ?>!</h2>        <div class="admin-stats">
             <div class="stat-card">
                 <h3>Total Users</h3>
                 <p><?php echo $totalUsers; ?></p>
@@ -385,52 +374,8 @@ $accessHistory = $accessHistoryStmt ? $accessHistoryStmt->fetchAll(PDO::FETCH_AS
                     <button onclick="downloadReport('AccessHistory')">Download Report</button>
                 </div>
             </div>
-            <div class="chart-container" data-chart-type="FileDistribution">
-                <h3>File Distribution by Document Type</h3>
-                <canvas id="fileDistributionChart"></canvas>
-                <div class="chart-data-table" style="display: none;"></div>
-                <div class="chart-actions">
-                    <button onclick="generateReport('FileDistribution')">Print Report</button>
-                </div>
-            </div>
-            <div class="chart-container" data-chart-type="UsersPerDepartment">
-                <h3>Users Per Department</h3>
-                <canvas id="usersPerDepartmentChart"></canvas>
-                <div class="chart-data-table" style="display: none;"></div>
-                <div class="chart-actions">
-                    <button onclick="generateReport('UsersPerDepartment')">Print Report</button>
-                </div>
-            </div>
-            <div class="chart-container" data-chart-type="DocumentCopies">
-                <h3>Document Copies Details</h3>
-                <canvas id="documentCopiesChart"></canvas>
-                <div class="chart-data-table" style="display: none;"></div>
-                <div class="chart-actions">
-                    <button onclick="generateReport('DocumentCopies')">Print Report</button>
-                </div>
-            </div>
-            <div class="chart-container" data-chart-type="PendingRequests">
-                <h3>Pending Requests</h3>
-                <div class="chart-data-table"></div>
-                <div class="chart-actions">
-                    <button onclick="generateReport('PendingRequests')">Print Report</button>
-                </div>
-            </div>
-            <div class="chart-container" data-chart-type="RetrievalHistory">
-                <h3>Retrieval History</h3>
-                <div class="chart-data-table"></div>
-                <div class="chart-actions">
-                    <button onclick="generateReport('RetrievalHistory')">Print Report</button>
-                </div>
-            </div>
-            <div class="chart-container" data-chart-type="AccessHistory">
-                <h3>Access History</h3>
-                <div class="chart-data-table"></div>
-                <div class="chart-actions">
-                    <button onclick="generateReport('AccessHistory')">Print Report</button>
-                </div>
-            </div>
-        </div>
+
+ 
         <div class="popup-overlay" id="popupOverlay">
             <div class="popup-content" id="popupContent">
                 <button class="popup-close" onclick="closePopup()">×</button>
