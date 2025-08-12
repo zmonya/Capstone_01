@@ -277,7 +277,8 @@ function getFileIcon(string $fileName): string
             </div>
             <div class="upload-file" id="fileUpload">
                 <h3>Upload File</h3>
-                <button id="uploadFileButton">Upload File</button>
+                <input type="file" id="fileInput" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.png,.txt,.zip" style="display: none;">
+                <button type="button" id="uploadFileButton">Upload File</button>
             </div>
             <div class="notification-log">
                 <h3>Notifications</h3>
@@ -545,44 +546,6 @@ function getFileIcon(string $fileName): string
             </form>
         </div>
 
-        <div class="popup-questionnaire" id="hardcopyStoragePopup">
-            <button class="exit-button" onclick="closePopup('hardcopyStoragePopup')" aria-label="Close Popup">×</button>
-            <h3>Hardcopy Storage</h3>
-            <p class="subtitle">Specify how to manage the physical copy.</p>
-            <div class="hardcopy-options">
-                <label class="checkbox-container">
-                    <input type="checkbox" id="hardcopyCheckbox" name="hard_copy_available">
-                    <span class="checkmark"></span>
-                    This file has a hardcopy
-                </label>
-                <div class="radio-group" id="hardcopyOptions" style="display: none;">
-                    <label class="radio-container">
-                        <input type="radio" name="hardcopyOption" value="link" checked>
-                        <span class="radio-checkmark"></span>
-                        Link to existing hardcopy
-                    </label>
-                    <label class="radio-container">
-                        <input type="radio" name="hardcopyOption" value="new">
-                        <span class="radio-checkmark"></span>
-                        Suggest new storage location
-                    </label>
-                    <div class="storage-suggestion" id="storageSuggestion"></div>
-                </div>
-                <div class="hardcopy-details" id="hardcopyDetails" style="display: none;">
-                    <label for="layer">Layer:</label>
-                    <input type="number" id="layer" name="layer" min="0">
-                    <label for="box">Box:</label>
-                    <input type="number" id="box" name="box" min="0">
-                    <label for="folder">Folder:</label>
-                    <input type="number" id="folder" name="folder" min="0">
-                </div>
-            </div>
-            <div class="button-group">
-                <button class="btn-back" onclick="handleHardcopyBack()">Back</button>
-                <button class="btn-next" onclick="handleHardcopyNext()">Next</button>
-            </div>
-        </div>
-
         <div class="popup-questionnaire" id="linkHardcopyPopup">
             <button class="exit-button" onclick="closePopup('linkHardcopyPopup')" aria-label="Close Popup">×</button>
             <h3>Link to Existing Hardcopy</h3>
@@ -637,671 +600,757 @@ function getFileIcon(string $fileName): string
     <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/notyf@3/notyf.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
-    <script>
-        const notyf = new Notyf();
-        let selectedFile = null;
-        let selectedHardcopyId = null;
+   <script>
+    const notyf = new Notyf();
+    let selectedFile = null;
+    let selectedHardcopyId = null;
 
-        $(document).ready(function() {
-            $('#recipientSelect').select2({
-                placeholder: "Select users or departments",
-                allowClear: true,
-                dropdownCssClass: 'select2-high-zindex'
-            });
-
-            $('.toggle-btn').on('click', function() {
-                $('.sidebar').toggleClass('minimized');
-                $('.top-nav, .main-content').toggleClass('resized', $('.sidebar').hasClass('minimized'));
-            });
-
-            function updateDateTime() {
-                const now = new Date();
-                $('#currentDate').text(now.toLocaleDateString('en-US', {
-                    weekday: 'long',
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric'
-                }));
-                $('#currentTime').text(now.toLocaleTimeString('en-US'));
-            }
-            setInterval(updateDateTime, 1000);
-            updateDateTime();
-
-            $('#selectDocumentButton').on('click', function() {
-                $('#fileSelectionPopup').show();
-            });
-
-            $('#uploadFileButton').on('click', function() {
-                const fileInput = $('<input type="file" id="fileInput" style="display: none;" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.png,.txt,.zip">');
-                $('body').append(fileInput);
-                fileInput.trigger('click');
-                fileInput.on('change', function() {
-                    const file = this.files[0];
-                    if (file) {
-                        if (file.size > 10 * 1024 * 1024) {
-                            notyf.error('File size exceeds 10MB.');
-                            return;
-                        }
-                        selectedFile = file;
-                        $('#fileDetailsPopup').show();
-                    }
-                    fileInput.remove();
-                });
-            });
-
-            $('#hardcopyCheckbox').on('change', function() {
-                $('#hardcopyOptions, #hardcopyDetails').toggle(this.checked);
-                if (!this.checked) {
-                    $('#storageSuggestion').hide().empty();
-                } else if ($('input[name="hardcopyOption"]:checked').val() === 'new') {
-                    fetchStorageSuggestion();
-                }
-            });
-
-            $('input[name="hardcopyOption"]').on('change', function() {
-                if (this.value === 'new') {
-                    $('#hardcopyDetails').show();
-                    fetchStorageSuggestion();
-                } else {
-                    $('#hardcopyDetails').hide();
-                    $('#storageSuggestion').hide().empty();
-                }
-            });
-
-            $("#searchInput").autocomplete({
-                source: function(request, response) {
-                    $.ajax({
-                        url: "autocomplete.php",
-                        dataType: "json",
-                        data: {
-                            term: request.term,
-                            csrf_token: '<?= htmlspecialchars($_SESSION['csrf_token']) ?>'
-                        },
-                        success: function(data) {
-                            if (data.success) {
-                                response(data.results);
-                            } else {
-                                notyf.error(data.message);
-                            }
-                        },
-                        error: function() {
-                            notyf.error('Error fetching autocomplete suggestions.');
-                        }
-                    });
-                },
-                minLength: 2,
-                select: function(event, ui) {
-                    $("#searchInput").val(ui.item.value);
-                    if (ui.item.document_type) $("#document-type").val(ui.item.document_type.toLowerCase());
-                    if (ui.item.department_id) $("#folder").val("department-" + ui.item.department_id);
-                    $("#search-form").submit();
-                }
-            });
-
-            $('#documentType').on('change', function() {
-                const docTypeName = $(this).val();
-                const dynamicFields = $('#dynamicFields');
-                dynamicFields.empty();
-
-                if (docTypeName) {
-                    $.ajax({
-                        url: 'get_document_type_field.php',
-                        method: 'POST',
-                        data: {
-                            document_type_name: docTypeName,
-                            csrf_token: '<?= htmlspecialchars($_SESSION['csrf_token']) ?>'
-                        },
-                        dataType: 'json',
-                        success: function(data) {
-                            if (data.success && Array.isArray(data.data.fields) && data.data.fields.length > 0) {
-                                data.data.fields.forEach(field => {
-                                    const requiredAttr = field.is_required ? 'required' : '';
-                                    let inputField = '';
-                                    switch (field.field_type) {
-                                        case 'text':
-                                            inputField = `<input type="text" id="${field.field_name}" name="${field.field_name}" ${requiredAttr}>`;
-                                            break;
-                                        case 'textarea':
-                                            inputField = `<textarea id="${field.field_name}" name="${field.field_name}" ${requiredAttr}></textarea>`;
-                                            break;
-                                        case 'date':
-                                            inputField = `<input type="date" id="${field.field_name}" name="${field.field_name}" ${requiredAttr}>`;
-                                            break;
-                                    }
-                                    dynamicFields.append(`
-                                        <label for="${field.field_name}">${field.field_label}${field.is_required ? ' *' : ''}:</label>
-                                        ${inputField}
-                                    `);
-                                });
-                            } else {
-                                dynamicFields.append(`<p>${data.message || 'No metadata fields defined for this document type.'}</p>`);
-                            }
-                        },
-                        error: function(jqXHR, textStatus, errorThrown) {
-                            console.error('AJAX error:', textStatus, errorThrown, jqXHR.responseText);
-                            notyf.error('Failed to load metadata fields.');
-                        }
-                    });
-                }
-            });
-
-            $(document).on('click', '.select-file-button', function() {
-                $('.file-item').removeClass('selected');
-                const $fileItem = $(this).closest('.file-item');
-                $fileItem.addClass('selected');
-                $('#sendFilePopup').data('selected-file-id', $fileItem.data('file-id'));
-                $('#fileSelectionPopup').hide();
-                $('#sendFilePopup').show();
-            });
-
-            $(document).on('click', '.notification-item', function() {
-                const status = $(this).data('status');
-                const fileId = $(this).data('file-id');
-                const notificationId = $(this).data('notification-id');
-                const message = $(this).data('message');
-
-                if (status !== 'pending') {
-                    $('#alreadyProcessedMessage').text('This request has already been processed.');
-                    $('#alreadyProcessedPopup').show();
-                    return;
-                }
-
-                $('#fileAcceptanceTitle').text('Review File');
-                $('#fileAcceptanceMessage').text(message);
-                $('#fileAcceptancePopup').data('notification-id', notificationId).data('file-id', fileId).show();
-                showFilePreview(fileId);
-            });
-
-            fetchNotifications();
-            setInterval(fetchNotifications, 5000);
+    $(document).ready(function() {
+        // Initialize Select2
+        $('#recipientSelect, #documentType, #departmentId').select2({
+            placeholder: "Select an option",
+            allowClear: true,
+            dropdownCssClass: 'select2-high-zindex'
         });
 
-        function fetchNotifications() {
-            $.ajax({
-                url: 'fetch_notifications.php',
-                method: 'GET',
-                data: {
-                    csrf_token: '<?= htmlspecialchars($_SESSION['csrf_token']) ?>'
-                },
-                dataType: 'json',
-                success: function(data) {
-                    const notificationContainer = $('.notification-log .log-entries');
-                    if (data.success) {
-                        const currentIds = notificationContainer.find('.notification-item').map(function() {
-                            return $(this).data('notification-id');
-                        }).get();
-                        const newIds = data.notifications.map(n => n.id);
-
-                        if (JSON.stringify(currentIds) !== JSON.stringify(newIds)) {
-                            notificationContainer.empty();
-                            if (data.notifications.length > 0) {
-                                data.notifications.forEach(n => {
-                                    const notificationClass = n.status === 'pending' ? 'pending-access' : 'processed-access';
-                                    notificationContainer.append(`
-                                        <div class="log-entry notification-item ${notificationClass}"
-                                             data-notification-id="${n.id}"
-                                             data-file-id="${n.file_id || ''}"
-                                             data-message="${n.message}"
-                                             data-status="${n.status}">
-                                            <i class="fas fa-bell"></i>
-                                            <p>${n.message}</p>
-                                            <span>${new Date(n.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</span>
-                                        </div>
-                                    `);
-                                });
-                            } else {
-                                notificationContainer.empty().append('<div class="log-entry no-notifications"><p>No new notifications.</p></div>');
-                            }
-                        }
-                    } else {
-                        notyf.error(data.message);
-                    }
-                },
-                error: function(jqXHR, textStatus, errorThrown) {
-                    console.error('Notification fetch error:', textStatus, errorThrown, jqXHR.responseText);
-                    notyf.error('Failed to fetch notifications. Check console for details.');
-                }
-            });
-        }
-
-        function showFilePreview(fileId) {
-            if (!fileId) {
-                $('#filePreview').html('<p>No file selected.</p>');
-                return;
-            }
-            $.ajax({
-                url: 'get_file_preview.php',
-                method: 'GET',
-                data: {
-                    file_id: fileId
-                },
-                success: function(data) {
-                    $('#filePreview').html(data);
-                },
-                error: function() {
-                    $('#filePreview').html('<p>Unable to load preview.</p>');
-                }
-            });
-        }
-
-        function handleFileAction(notificationId, fileId, action) {
-            if (!notificationId || !fileId) {
-                notyf.error('Invalid notification or file ID.');
-                return;
-            }
-            $.ajax({
-                url: 'handle_file_acceptance.php',
-                method: 'POST',
-                data: {
-                    notification_id: notificationId,
-                    file_id: fileId,
-                    action: action,
-                    csrf_token: '<?= htmlspecialchars($_SESSION['csrf_token']) ?>'
-                },
-                dataType: 'json',
-                success: function(response) {
-                    if (response.success) {
-                        notyf.success(response.message);
-                        $('#fileAcceptancePopup').hide();
-                        $('.notification-item[data-notification-id="' + notificationId + '"]')
-                            .removeClass('pending-access')
-                            .addClass('processed-access')
-                            .off('click')
-                            .find('p').text(response.message + ' (Processed)');
-                        fetchNotifications();
-                        if (response.redirect) window.location.href = response.redirect;
-                    } else {
-                        notyf.error(response.message);
-                    }
-                },
-                error: function() {
-                    notyf.error('Error processing file action.');
-                }
-            });
-        }
-
-        function closePopup(popupId) {
-            $(`#${popupId}`).hide();
-            if (popupId === 'sendFilePopup') {
-                $('.file-item').removeClass('selected');
-                $('#sendFilePopup').removeData('selected-file-id');
-            }
-            if (popupId === 'fileDetailsPopup') {
-                selectedFile = null;
-                $('#dynamicFields').empty();
-                $('#hardcopyDetails').hide();
-                $('#hardcopyCheckbox').prop('checked', false);
-            }
-            if (popupId === 'hardcopyStoragePopup') {
-                $('#storageSuggestion').empty();
-                $('#hardcopyDetails').hide();
-            }
-            if (popupId === 'linkHardcopyPopup') {
-                selectedHardcopyId = null;
-                $('#hardcopyList').empty();
-                $('#linkHardcopyButton').prop('disabled', true);
-            }
-        }
-
-        function toggleActivityLog() {
-            $('#activityLog').toggle();
-        }
-
-        $(document).on('click', function(event) {
-            if (!$(event.target).closest('.activity-log, .activity-log-icon').length) {
-                $('#activityLog').hide();
-            }
+        // Toggle Sidebar
+        $('.toggle-btn').on('click', function() {
+            $('.sidebar').toggleClass('minimized');
+            $('.top-nav, .main-content').toggleClass('resized', $('.sidebar').hasClass('minimized'));
         });
 
-        function proceedToHardcopy() {
-            const documentType = $('#documentType').val();
-            if (!documentType) {
-                notyf.error('Please select a document type.');
-                return;
-            }
-            $('#fileDetailsPopup').hide();
-            $('#hardcopyStoragePopup').show();
-            if ($('#hardcopyCheckbox').is(':checked') && $('input[name="hardcopyOption"]:checked').val() === 'new') {
-                fetchStorageSuggestion();
-            }
+        // Update Date and Time
+        function updateDateTime() {
+            const now = new Date();
+            $('#currentDate').text(now.toLocaleDateString('en-US', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            }));
+            $('#currentTime').text(now.toLocaleTimeString('en-US'));
         }
+        setInterval(updateDateTime, 1000);
+        updateDateTime();
 
-        function handleHardcopyBack() {
-            $('#hardcopyStoragePopup').hide();
-            $('#fileDetailsPopup').show();
-        }
+        // File Selection Popup
+        $('#selectDocumentButton').on('click', function() {
+            $('#fileSelectionPopup').show();
+        });
 
-        function handleHardcopyNext() {
-            const hardcopyAvailable = $('#hardcopyCheckbox').is(':checked');
-            if (hardcopyAvailable && $('input[name="hardcopyOption"]:checked').val() === 'link') {
-                $('#hardcopyStoragePopup').hide();
-                $('#linkHardcopyPopup').show();
-                fetchHardcopyFiles();
+        // File Upload Button Click Handler
+        $('#uploadFileButton').on('click', function() {
+            const $fileInput = $('#fileInput');
+            if ($fileInput.length) {
+                $fileInput.trigger('click');
             } else {
-                uploadFile();
+                console.error('File input element (#fileInput) not found.');
+                notyf.error('File upload input is not available. Please refresh the page.');
             }
-        }
+        });
 
-        function fetchHardcopyFiles() {
-            const departmentId = $('#departmentId').val();
-            if (!departmentId) {
-                notyf.error('Please select a department.');
-                return;
-            }
-            $.ajax({
-                url: 'fetch_hardcopy_files.php',
-                method: 'POST',
-                data: {
-                    department_id: departmentId,
-                    csrf_token: '<?= htmlspecialchars($_SESSION['csrf_token']) ?>'
-                },
-                dataType: 'json',
-                success: function(data) {
-                    const hardcopyList = $('#hardcopyList');
-                    hardcopyList.empty();
-                    if (data.success && data.files.length > 0) {
-                        data.files.forEach(file => {
-                            const metadata = file.meta_data ? JSON.parse(file.meta_data) : {};
-                            const location = metadata.cabinet ?
-                                `Cabinet: ${metadata.cabinet}, Layer: ${metadata.layer || 'N/A'}, Box: ${metadata.box || 'N/A'}, Folder: ${metadata.folder || 'N/A'}` : 'No location specified';
-                            hardcopyList.append(`
-                                <div class="file-item" data-file-id="${file.id}">
-                                    <input type="radio" name="hardcopyFile" value="${file.id}">
-                                    <span>${file.file_name} (${location})</span>
-                                </div>
-                            `);
-                        });
-                        hardcopyList.find('input').on('change', function() {
-                            selectedHardcopyId = $(this).val();
-                            $('#linkHardcopyButton').prop('disabled', false);
-                        });
-                    } else {
-                        hardcopyList.append('<p>No hardcopy files available.</p>');
-                    }
-                },
-                error: function() {
-                    notyf.error('Failed to fetch hardcopy files.');
-                }
-            });
-        }
-
-        function filterHardcopies() {
-            const searchTerm = $('#hardcopySearch').val().toLowerCase();
-            $('#hardcopyList .file-item').each(function() {
-                const fileName = $(this).find('span').text().toLowerCase();
-                $(this).toggle(fileName.includes(searchTerm));
-            });
-        }
-
-        function linkHardcopy() {
-            if (!selectedHardcopyId) {
-                notyf.error('Please select a hardcopy to link.');
-                return;
-            }
-            uploadFile();
-        }
-
-        function fetchStorageSuggestion() {
-            const departmentId = $('#departmentId').val();
-            if (!departmentId) {
-                $('#storageSuggestion').html('<p>No department selected.</p>').show();
-                return;
-            }
-            $.ajax({
-                url: 'get_storage_suggestions.php',
-                method: 'POST',
-                data: {
-                    department_id: departmentId,
-                    csrf_token: '<?= htmlspecialchars($_SESSION['csrf_token']) ?>'
-                },
-                dataType: 'json',
-                success: function(data) {
-                    if (data.success) {
-                        window.storageMetadata = data.metadata;
-                        $('#storageSuggestion').html(`<p>Suggested Location: Cabinet ${data.metadata.cabinet}, Layer ${data.metadata.layer}, Box ${data.metadata.box}, Folder ${data.metadata.folder}</p>`).show();
-                        $('#layer').val(data.metadata.layer);
-                        $('#box').val(data.metadata.box);
-                        $('#folder').val(data.metadata.folder);
-                    } else {
-                        $('#storageSuggestion').html(`<p>${data.message}</p>`).show();
-                    }
-                },
-                error: function() {
-                    $('#storageSuggestion').html('<p>Failed to fetch suggestion.</p>').show();
-                }
-            });
-        }
-
-        function uploadFile() {
-            const documentType = $('#documentType').val();
-            if (!documentType) {
-                notyf.error('Please select a document type.');
-                return;
-            }
-            if (!selectedFile) {
+        // File Input Change Handler
+        $('#fileInput').on('change', function() {
+            const file = this.files[0];
+            console.log('File selected:', file);
+            if (!file) {
                 notyf.error('No file selected.');
                 return;
             }
+            if (file.size > 10 * 1024 * 1024) {
+                notyf.error('File size exceeds 10MB.');
+                this.value = '';
+                return;
+            }
+            const allowedTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'image/jpeg', 'image/png', 'text/plain', 'application/zip'];
+            if (!allowedTypes.includes(file.type)) {
+                notyf.error('Invalid file type. Allowed types: PDF, DOC, DOCX, XLS, XLSX, JPG, PNG, TXT, ZIP.');
+                this.value = '';
+                return;
+            }
+            selectedFile = file;
+            $('#fileDetailsPopup').show();
+        });
 
-            const formData = new FormData();
-            formData.append('file', selectedFile);
-            formData.append('document_type', documentType);
-            formData.append('user_id', '<?= htmlspecialchars($userId) ?>');
-            formData.append('csrf_token', '<?= htmlspecialchars($_SESSION['csrf_token']) ?>');
-            formData.append('hard_copy_available', $('#hardcopyCheckbox').is(':checked') ? 1 : 0);
-            formData.append('cabinet', $('#cabinet').val());
+        // Hardcopy Checkbox Handler
+        $('#hardcopyCheckbox').on('change', function() {
+            $('#hardcopyOptions').toggle(this.checked);
+            if (this.checked && $('input[name="hardcopyOption"]:checked').val() === 'new') {
+                $('#hardcopyDetails').show();
+                fetchStorageSuggestion();
+            } else {
+                $('#hardcopyDetails').hide();
+                $('#storageSuggestion').hide().empty();
+            }
+        });
 
-            if ($('#hardcopyCheckbox').is(':checked') && $('input[name="hardcopyOption"]:checked').val() === 'new') {
-                formData.append('layer', $('#layer').val() || window.storageMetadata?.layer || 0);
-                formData.append('box', $('#box').val() || window.storageMetadata?.box || 0);
-                formData.append('folder', $('#folder').val() || window.storageMetadata?.folder || 0);
-            } else if ($('#hardcopyCheckbox').is(':checked') && $('input[name="hardcopyOption"]:checked').val() === 'link' && selectedHardcopyId) {
-                formData.append('link_hardcopy_id', selectedHardcopyId);
+        $('input[name="hardcopyOption"]').on('change', function() {
+            if (this.value === 'new') {
+                $('#hardcopyDetails').show();
+                fetchStorageSuggestion();
+            } else {
+                $('#hardcopyDetails').hide();
+                $('#storageSuggestion').hide().empty();
+            }
+        });
+
+        // Autocomplete Setup
+        $("#searchInput").autocomplete({
+            source: function(request, response) {
+                $.ajax({
+                    url: "autocomplete.php",
+                    dataType: "json",
+                    data: {
+                        term: request.term,
+                        csrf_token: '<?= htmlspecialchars($_SESSION['csrf_token']) ?>'
+                    },
+                    success: function(data) {
+                        if (data.success) {
+                            response(data.results);
+                        } else {
+                            notyf.error(data.message);
+                        }
+                    },
+                    error: function() {
+                        notyf.error('Error fetching autocomplete suggestions.');
+                    }
+                });
+            },
+            minLength: 2,
+            select: function(event, ui) {
+                $("#searchInput").val(ui.item.value);
+                if (ui.item.document_type) $("#document-type").val(ui.item.document_type.toLowerCase());
+                if (ui.item.department_id) $("#folder").val("department-" + ui.item.department_id);
+                $("#search-form").submit();
+            }
+        });
+
+        // Dynamic Fields for Document Type
+        $('#documentType').on('change', function() {
+            const docTypeName = $(this).val();
+            const dynamicFields = $('#dynamicFields');
+            dynamicFields.empty();
+
+            if (docTypeName) {
+                $.ajax({
+                    url: 'get_document_type_field.php',
+                    method: 'POST',
+                    data: {
+                        document_type_name: docTypeName,
+                        csrf_token: '<?= htmlspecialchars($_SESSION['csrf_token']) ?>'
+                    },
+                    dataType: 'json',
+                    success: function(data) {
+                        if (data.success && Array.isArray(data.data.fields) && data.data.fields.length > 0) {
+                            data.data.fields.forEach(field => {
+                                const requiredAttr = field.is_required ? 'required' : '';
+                                let inputField = '';
+                                switch (field.field_type) {
+                                    case 'text':
+                                        inputField = `<input type="text" id="${field.field_name}" name="${field.field_name}" ${requiredAttr}>`;
+                                        break;
+                                    case 'textarea':
+                                        inputField = `<textarea id="${field.field_name}" name="${field.field_name}" ${requiredAttr}></textarea>`;
+                                        break;
+                                    case 'date':
+                                        inputField = `<input type="date" id="${field.field_name}" name="${field.field_name}" ${requiredAttr}>`;
+                                        break;
+                                }
+                                dynamicFields.append(`
+                                    <label for="${field.field_name}">${field.field_label}${field.is_required ? ' *' : ''}:</label>
+                                    ${inputField}
+                                `);
+                            });
+                        } else {
+                            dynamicFields.append(`<p>${data.message || 'No metadata fields defined for this document type.'}</p>`);
+                        }
+                    },
+                    error: function(jqXHR, textStatus, errorThrown) {
+                        console.error('AJAX error:', textStatus, errorThrown, jqXHR.responseText);
+                        notyf.error('Failed to load metadata fields.');
+                    }
+                });
+            }
+        });
+
+        // Form Submission
+        $('#fileDetailsForm').on('submit', function(e) {
+            e.preventDefault();
+            proceedToHardcopy();
+        });
+
+        // File Selection
+        $(document).on('click', '.select-file-button', function() {
+            $('.file-item').removeClass('selected');
+            const $fileItem = $(this).closest('.file-item');
+            $fileItem.addClass('selected');
+            $('#sendFilePopup').data('selected-file-id', $fileItem.data('file-id'));
+            $('#fileSelectionPopup').hide();
+            $('#sendFilePopup').show();
+        });
+
+        $(document).on('click', '.notification-item', function() {
+            const status = $(this).data('status');
+            const fileId = $(this).data('file-id');
+            const notificationId = $(this).data('notification-id');
+            const message = $(this).data('message');
+
+            if (status !== 'pending') {
+                $('#alreadyProcessedMessage').text('This request has already been processed.');
+                $('#alreadyProcessedPopup').show();
+                return;
             }
 
-            $('#fileDetailsForm').find('input, textarea, select').each(function() {
-                const name = $(this).attr('name');
-                const value = $(this).val();
-                if (name && value && !['department_id', 'document_type', 'csrf_token', 'cabinet', 'layer', 'box', 'folder', 'hard_copy_available'].includes(name)) {
-                    formData.append(name, value);
-                }
-            });
+            $('#fileAcceptanceTitle').text('Review File');
+            $('#fileAcceptanceMessage').text(message);
+            $('#fileAcceptancePopup').data('notification-id', notificationId).data('file-id', fileId).show();
+            showFilePreview(fileId);
+        });
 
-            $.ajax({
-                url: 'upload_handler.php',
-                method: 'POST',
-                data: formData,
-                processData: false,
-                contentType: false,
-                xhr: function() {
-                    const xhr = new XMLHttpRequest();
+        fetchNotifications();
+        setInterval(fetchNotifications, 5000);
+    });
+
+    // Notification Fetching
+    function fetchNotifications() {
+        $.ajax({
+            url: 'fetch_notifications.php',
+            method: 'GET',
+            data: {
+                csrf_token: '<?= htmlspecialchars($_SESSION['csrf_token']) ?>'
+            },
+            dataType: 'json',
+            success: function(data) {
+                const notificationContainer = $('.notification-log .log-entries');
+                if (data.success) {
+                    const currentIds = notificationContainer.find('.notification-item').map(function() {
+                        return $(this).data('notification-id');
+                    }).get();
+                    const newIds = data.notifications.map(n => n.id);
+
+                    if (JSON.stringify(currentIds) !== JSON.stringify(newIds)) {
+                        notificationContainer.empty();
+                        if (data.notifications.length > 0) {
+                            data.notifications.forEach(n => {
+                                const notificationClass = n.status === 'pending' ? 'pending-access' : 'processed-access';
+                                notificationContainer.append(`
+                                    <div class="log-entry notification-item ${notificationClass}"
+                                         data-notification-id="${n.id}"
+                                         data-file-id="${n.file_id || ''}"
+                                         data-message="${n.message}"
+                                         data-status="${n.status}">
+                                        <i class="fas fa-bell"></i>
+                                        <p>${n.message}</p>
+                                        <span>${new Date(n.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</span>
+                                    </div>
+                                `);
+                            });
+                        } else {
+                            notificationContainer.empty().append('<div class="log-entry no-notifications"><p>No new notifications.</p></div>');
+                        }
+                    }
+                } else {
+                    notyf.error(data.message);
+                }
+            },
+            error: function(jqXHR, textStatus, errorThrown) {
+                console.error('Notification fetch error:', textStatus, errorThrown, jqXHR.responseText);
+                notyf.error('Failed to fetch notifications. Check console for details.');
+            }
+        });
+    }
+
+    // File Preview
+    function showFilePreview(fileId) {
+        if (!fileId) {
+            $('#filePreview').html('<p>No file selected.</p>');
+            return;
+        }
+        $.ajax({
+            url: 'get_file_preview.php',
+            method: 'GET',
+            data: {
+                file_id: fileId
+            },
+            success: function(data) {
+                $('#filePreview').html(data);
+            },
+            error: function() {
+                $('#filePreview').html('<p>Unable to load preview.</p>');
+            }
+        });
+    }
+
+    // File Action Handling
+    function handleFileAction(notificationId, fileId, action) {
+        if (!notificationId || !fileId) {
+            notyf.error('Invalid notification or file ID.');
+            return;
+        }
+        $.ajax({
+            url: 'handle_file_acceptance.php',
+            method: 'POST',
+            data: {
+                notification_id: notificationId,
+                file_id: fileId,
+                action: action,
+                csrf_token: '<?= htmlspecialchars($_SESSION['csrf_token']) ?>'
+            },
+            dataType: 'json',
+            success: function(response) {
+                if (response.success) {
+                    notyf.success(response.message);
+                    $('#fileAcceptancePopup').hide();
+                    $('.notification-item[data-notification-id="' + notificationId + '"]')
+                        .removeClass('pending-access')
+                        .addClass('processed-access')
+                        .off('click')
+                        .find('p').text(response.message + ' (Processed)');
+                    fetchNotifications();
+                    if (response.redirect) window.location.href = response.redirect;
+                } else {
+                    notyf.error(response.message);
+                }
+            },
+            error: function() {
+                notyf.error('Error processing file action.');
+            }
+        });
+    }
+
+    $('#acceptFileButton').on('click', function() {
+        const notificationId = $('#fileAcceptancePopup').data('notification-id');
+        const fileId = $('#fileAcceptancePopup').data('file-id');
+        handleFileAction(notificationId, fileId, 'accept');
+    });
+
+    $('#denyFileButton').on('click', function() {
+        const notificationId = $('#fileAcceptancePopup').data('notification-id');
+        const fileId = $('#fileAcceptancePopup').data('file-id');
+        handleFileAction(notificationId, fileId, 'deny');
+    });
+
+    // Popup Management
+    function closePopup(popupId) {
+        $(`#${popupId}`).hide();
+        if (popupId === 'sendFilePopup') {
+            $('.file-item').removeClass('selected');
+            $('#sendFilePopup').removeData('selected-file-id');
+        }
+        if (popupId === 'fileDetailsPopup' || popupId === 'linkHardcopyPopup') {
+            resetUploadForm();
+        }
+    }
+
+    function toggleActivityLog() {
+        $('#activityLog').toggle();
+    }
+
+    $(document).on('click', function(event) {
+        if (!$(event.target).closest('.activity-log, .activity-log-icon').length) {
+            $('#activityLog').hide();
+        }
+    });
+
+    // Proceed to Hardcopy or Upload
+    function proceedToHardcopy() {
+        const documentType = $('#documentType').val();
+        if (!documentType) {
+            notyf.error('Please select a document type.');
+            return;
+        }
+        if ($('#hardcopyCheckbox').is(':checked') && $('input[name="hardcopyOption"]:checked').val() === 'link') {
+            fetchHardcopyFiles();
+            $('#fileDetailsPopup').hide();
+            $('#linkHardcopyPopup').show();
+        } else {
+            uploadFile();
+        }
+    }
+
+    // Fetch Hardcopy Files
+    function fetchHardcopyFiles() {
+        const departmentId = $('#departmentId').val();
+        const documentType = $('#documentType').val();
+        if (!departmentId || !documentType) {
+            notyf.error('Please select both a department and a document type.');
+            return;
+        }
+        $.ajax({
+            url: 'fetch_hardcopy_files.php',
+            method: 'POST',
+            data: {
+                department_id: departmentId,
+                document_type: documentType,
+                csrf_token: '<?= htmlspecialchars($_SESSION['csrf_token']) ?>'
+            },
+            dataType: 'json',
+            success: function(data) {
+                const hardcopyList = $('#hardcopyList');
+                hardcopyList.empty();
+                if (data.success && data.files.length > 0) {
+                    data.files.forEach(file => {
+                        const metadata = file.meta_data ? JSON.parse(file.meta_data) : {};
+                        const location = metadata.cabinet ?
+                            `Cabinet: ${metadata.cabinet}, Layer: ${metadata.layer || 'N/A'}, Box: ${metadata.box || 'N/A'}, Folder: ${metadata.folder || 'N/A'}` : 'No location specified';
+                        hardcopyList.append(`
+                            <div class="file-item" data-file-id="${file.id}">
+                                <input type="radio" name="hardcopyFile" value="${file.id}">
+                                <span>${file.file_name} (${location})</span>
+                            </div>
+                        `);
+                    });
+                    hardcopyList.find('input').on('change', function() {
+                        selectedHardcopyId = $(this).val();
+                        $('#linkHardcopyButton').prop('disabled', !selectedHardcopyId);
+                    });
+                } else {
+                    hardcopyList.append('<p>No hardcopy files available for this department and document type.</p>');
+                    $('#linkHardcopyButton').prop('disabled', true);
+                }
+            },
+            error: function(jqXHR, textStatus, errorThrown) {
+                console.error('Hardcopy fetch error:', textStatus, errorThrown, jqXHR.responseText);
+                notyf.error('Failed to fetch hardcopy files.');
+            }
+        });
+    }
+
+    function filterHardcopies() {
+        const searchTerm = $('#hardcopySearch').val().toLowerCase();
+        $('#hardcopyList .file-item').each(function() {
+            const fileName = $(this).find('span').text().toLowerCase();
+            $(this).toggle(fileName.includes(searchTerm));
+        });
+    }
+
+    function linkHardcopy() {
+        if (!selectedHardcopyId) {
+            notyf.error('Please select a hardcopy to link.');
+            return;
+        }
+        $('#linkHardcopyPopup').hide();
+        uploadFile();
+    }
+
+    function fetchStorageSuggestion() {
+        const departmentId = $('#departmentId').val();
+        const documentType = $('#documentType').val();
+        if (!departmentId || !documentType) {
+            $('#storageSuggestion').html('<p>Please select both a department and a document type.</p>').show();
+            return;
+        }
+        $.ajax({
+            url: 'get_storage_suggestions.php',
+            method: 'POST',
+            data: {
+                department_id: departmentId,
+                document_type: documentType,
+                csrf_token: '<?= htmlspecialchars($_SESSION['csrf_token']) ?>'
+            },
+            dataType: 'json',
+            success: function(data) {
+                if (data.success && data.metadata) {
+                    window.storageMetadata = data.metadata;
+                    $('#storageSuggestion').html(`
+                        <p>Suggested Location: Cabinet ${data.metadata.cabinet || 'N/A'}, 
+                        Layer ${data.metadata.layer || 'N/A'}, 
+                        Box ${data.metadata.box || 'N/A'}, 
+                        Folder ${data.metadata.folder || 'N/A'}</p>
+                    `).show();
+                    $('#cabinet').val(data.metadata.cabinet || '');
+                    $('#layer').val(data.metadata.layer || '');
+                    $('#box').val(data.metadata.box || '');
+                    $('#folder').val(data.metadata.folder || '');
+                } else {
+                    $('#storageSuggestion').html(`<p>${data.message || 'No storage suggestion available.'}</p>`).show();
+                    window.storageMetadata = null;
+                }
+            },
+            error: function(jqXHR, textStatus, errorThrown) {
+                console.error('Storage suggestion error:', textStatus, errorThrown, jqXHR.responseText);
+                $('#storageSuggestion').html('<p>Failed to fetch storage suggestion.</p>').show();
+                window.storageMetadata = null;
+            }
+        });
+    }
+
+    function uploadFile() {
+        const documentType = $('#documentType').val();
+        const departmentId = $('#departmentId').val();
+        console.log('Uploading file:', { documentType, departmentId, selectedFile, selectedHardcopyId });
+        if (!documentType) {
+            notyf.error('Please select a document type.');
+            return;
+        }
+        if (!departmentId) {
+            notyf.error('Please select a department.');
+            return;
+        }
+        if (!$('#hardcopyCheckbox').is(':checked') && !selectedFile) {
+            notyf.error('No file selected for upload.');
+            return;
+        }
+
+        const formData = new FormData();
+        if (selectedFile) {
+            formData.append('file', selectedFile);
+            console.log('Appending file:', selectedFile.name);
+        }
+        formData.append('document_type', documentType);
+        formData.append('user_id', '<?= htmlspecialchars($userId) ?>');
+        formData.append('csrf_token', '<?= htmlspecialchars($_SESSION['csrf_token']) ?>');
+        formData.append('department_id', departmentId);
+        formData.append('cabinet', $('#cabinet').val() || '');
+        formData.append('hard_copy_available', $('#hardcopyCheckbox').is(':checked') ? 1 : 0);
+
+        if ($('#hardcopyCheckbox').is(':checked')) {
+            const hardcopyOption = $('input[name="hardcopyOption"]:checked').val();
+            if (hardcopyOption === 'new') {
+                const layer = $('#layer').val() || (window.storageMetadata?.layer || 0);
+                const box = $('#box').val() || (window.storageMetadata?.box || 0);
+                const folder = $('#folder').val() || (window.storageMetadata?.folder || 0);
+                if (!$('#cabinet').val() || layer === '' || box === '' || folder === '') {
+                    notyf.error('Please provide complete storage details for new hardcopy.');
+                    return;
+                }
+                formData.append('layer', layer);
+                formData.append('box', box);
+                formData.append('folder', folder);
+            } else if (hardcopyOption === 'link' && selectedHardcopyId) {
+                formData.append('link_hardcopy_id', selectedHardcopyId);
+            } else {
+                notyf.error('Please select a hardcopy file to link or specify new storage details.');
+                return;
+            }
+        }
+
+        $('#fileDetailsForm').find('input:not([type="file"]), textarea, select').each(function() {
+            const name = $(this).attr('name');
+            const value = $(this).val();
+            if (name && value && !['department_id', 'document_type', 'csrf_token', 'cabinet', 'layer', 'box', 'folder', 'hard_copy_available', 'hardcopyOption'].includes(name)) {
+                formData.append(`metadata[${name}]`, value);
+                console.log(`Appending metadata: ${name}=${value}`);
+            }
+        });
+
+        let progressNotyf = null;
+        $.ajax({
+            url: 'upload_handler.php',
+            method: 'POST',
+            data: formData,
+            processData: false,
+            contentType: false,
+            xhr: function() {
+                const xhr = new XMLHttpRequest();
+                if (selectedFile) {
                     xhr.upload.addEventListener('progress', function(e) {
                         if (e.lengthComputable) {
                             const percent = Math.round((e.loaded / e.total) * 100);
-                            notyf.open({
+                            if (progressNotyf) {
+                                notyf.dismiss(progressNotyf);
+                            }
+                            progressNotyf = notyf.open({
                                 type: 'info',
                                 message: `Uploading: ${percent}%`,
                                 duration: 0
                             });
                         }
                     }, false);
-                    return xhr;
-                },
-                success: function(data) {
-                    const response = typeof data === 'string' ? JSON.parse(data) : data;
-                    if (response.success) {
-                        notyf.success(response.message);
-                        $('#hardcopyStoragePopup').hide();
-                        $('#linkHardcopyPopup').hide();
-                        selectedFile = null;
-                        selectedHardcopyId = null;
-                        window.storageMetadata = null;
-                        window.location.href = 'my-folder.php';
-                    } else {
-                        notyf.error(response.message || 'Failed to upload file.');
-                    }
-                },
-                error: function(jqXHR, textStatus, errorThrown) {
-                    console.error('Upload error:', textStatus, errorThrown, jqXHR.responseText);
-                    notyf.error('An error occurred while uploading the file.');
                 }
-            });
-        }
-
-        function sendFile() {
-            const recipients = $('#recipientSelect').val();
-            if (!recipients || recipients.length === 0) {
-                notyf.error('Please select at least one recipient.');
-                return;
+                return xhr;
+            },
+            success: function(data) {
+                if (progressNotyf) {
+                    notyf.dismiss(progressNotyf);
+                }
+                console.log('Upload response:', data);
+                let response;
+                try {
+                    response = typeof data === 'string' ? JSON.parse(data) : data;
+                } catch (e) {
+                    console.error('Invalid server response:', data);
+                    notyf.error('Invalid server response. Check console for details.');
+                    return;
+                }
+                if (response.success) {
+                    notyf.success(response.message);
+                    resetUploadForm();
+                    window.location.reload();
+                } else {
+                    notyf.error(response.message || 'Failed to upload file.');
+                }
+            },
+            error: function(jqXHR, textStatus, errorThrown) {
+                if (progressNotyf) {
+                    notyf.dismiss(progressNotyf);
+                }
+                console.error('Upload error:', textStatus, errorThrown, jqXHR.responseText);
+                notyf.error('An error occurred while uploading the file. Check console for details.');
             }
-            const fileId = $('.file-item.selected').data('file-id') || $('#sendFilePopup').data('selected-file-id');
-            if (!fileId) {
-                notyf.error('No file selected to send.');
-                return;
+        });
+    }
+
+    function resetUploadForm() {
+        selectedFile = null;
+        selectedHardcopyId = null;
+        window.storageMetadata = null;
+        $('#fileInput').val('');
+        $('#fileDetailsForm')[0].reset();
+        $('#dynamicFields').empty();
+        $('#hardcopyDetails').hide();
+        $('#hardcopyOptions').hide();
+        $('#storageSuggestion').hide().empty();
+        $('#hardcopyCheckbox').prop('checked', false);
+        $('#linkHardcopyButton').prop('disabled', true);
+        $('#documentType, #departmentId').val('').trigger('change');
+        closePopup('fileDetailsPopup');
+        closePopup('linkHardcopyPopup');
+    }
+
+    function sendFile() {
+        const recipients = $('#recipientSelect').val();
+        if (!recipients || recipients.length === 0) {
+            notyf.error('Please select at least one recipient.');
+            return;
+        }
+        const fileId = $('.file-item.selected').data('file-id') || $('#sendFilePopup').data('selected-file-id');
+        if (!fileId) {
+            notyf.error('No file selected to send.');
+            return;
+        }
+
+        $.ajax({
+            url: 'send_file_handler.php',
+            method: 'POST',
+            data: {
+                file_id: fileId,
+                recipients: recipients,
+                csrf_token: '<?= htmlspecialchars($_SESSION['csrf_token']) ?>'
+            },
+            dataType: 'json',
+            success: function(response) {
+                if (response.success) {
+                    notyf.success(response.message);
+                    closePopup('sendFilePopup');
+                    fetchNotifications();
+                } else {
+                    notyf.error(response.message);
+                }
+            },
+            error: function(jqXHR, textStatus, errorThrown) {
+                console.error('Send file error:', textStatus, errorThrown, jqXHR.responseText);
+                notyf.error('Failed to send file. Check console for details.');
             }
+        });
+    }
 
-            $.ajax({
-                url: 'send_file_handler.php',
-                method: 'POST',
-                data: {
-                    file_id: fileId,
-                    recipients: recipients,
-                    csrf_token: '<?= htmlspecialchars($_SESSION['csrf_token']) ?>'
-                },
-                dataType: 'json',
-                success: function(response) {
-                    if (response.success) {
-                        notyf.success(response.message);
-                        $('#sendFilePopup').hide();
-                        $('.file-item').removeClass('selected');
-                        $('#sendFilePopup').removeData('selected-file-id');
-                    } else {
-                        notyf.error(response.message || 'Error sending file.');
-                    }
-                },
-                error: function() {
-                    notyf.error('Error sending file.');
-                }
-            });
+    function viewFile(fileId) {
+        if (!fileId) {
+            notyf.error('Invalid file ID.');
+            return;
         }
+        window.location.href = `view_file.php?file_id=${fileId}`;
+    }
 
-        function viewFile(fileId) {
-            showFilePreview(fileId);
-            $('#fileAcceptancePopup').data('file-id', fileId).show();
-            $('#fileAcceptanceTitle').text('View File');
-            $('#fileAcceptanceMessage').text('Previewing file.');
-            $('#acceptFileButton, #denyFileButton').hide();
-        }
+    function sortPersonalFiles() {
+        const sortName = $('.sort-personal-name').val();
+        const sortType = $('.sort-personal-type').val();
+        const sortSource = $('.sort-personal-source').val();
+        const isHardCopy = $('#hardCopyPersonalFilter').is(':checked');
 
-        function sortPersonalFiles() {
-            const nameSort = $('.sort-personal-name').val();
-            const typeSort = $('.sort-personal-type').val();
-            const sourceSort = $('.sort-personal-source').val();
-            const $container = $('#personalFiles');
-            const $items = $container.find('.file-item').get();
-
-            $items.sort(function(a, b) {
-                const aData = $(a).data();
-                const bData = $(b).data();
-
-                if (nameSort) {
-                    return nameSort === 'name-asc' ?
-                        aData.fileName.localeCompare(bData.fileName) :
-                        bData.fileName.localeCompare(aData.fileName);
-                }
-                if (typeSort) {
-                    const docType = typeSort.replace('type-', '');
-                    if (aData.documentType === docType && bData.documentType !== docType) return -1;
-                    if (bData.documentType === docType && aData.documentType !== docType) return 1;
-                    return 0;
-                }
-                if (sourceSort) {
-                    if (sourceSort === aData.source) return -1;
-                    if (sourceSort === bData.source) return 1;
-                    return 0;
-                }
-                return 0;
-            });
-
-            $container.empty().append($items);
-        }
-
-        function filterPersonalFilesByHardCopy() {
-            const showHardCopyOnly = $('#hardCopyPersonalFilter').is(':checked');
-            $('#personalFiles .file-item').each(function() {
-                const hasHardCopy = $(this).data('hard-copy') == 1;
-                $(this).toggle(!showHardCopyOnly || hasHardCopy);
-            });
-        }
-
-        function sortDepartmentFiles(deptId) {
-            const nameSort = $(`.sort-department-name[data-dept-id="${deptId}"]`).val();
-            const typeSort = $(`.sort-department-type[data-dept-id="${deptId}"]`).val();
-            const $container = $(`#departmentFiles-${deptId}`);
-            const $items = $container.find('.file-item').get();
-
-            $items.sort(function(a, b) {
-                const aData = $(a).data();
-                const bData = $(b).data();
-
-                if (nameSort) {
-                    return nameSort === 'name-asc' ?
-                        aData.fileName.localeCompare(bData.fileName) :
-                        bData.fileName.localeCompare(aData.fileName);
-                }
-                if (typeSort) {
-                    const docType = typeSort.replace('type-', '');
-                    if (aData.documentType === docType && bData.documentType !== docType) return -1;
-                    if (bData.documentType === docType && aData.documentType !== docType) return 1;
-                    return 0;
-                }
-                return 0;
-            });
-
-            $container.empty().append($items);
-        }
-
-        function filterDepartmentFilesByHardCopy(deptId) {
-            const showHardCopyOnly = $(`.hard-copy-department-filter[data-dept-id="${deptId}"]`).is(':checked');
-            $(`#departmentFiles-${deptId} .file-item`).each(function() {
-                const hasHardCopy = $(this).data('hard-copy') == 1;
-                $(this).toggle(!showHardCopyOnly || hasHardCopy);
-            });
-        }
-
-        function switchView(view) {
-            const fileDisplay = $('#fileDisplay');
-            if (view === 'thumbnail') {
-                fileDisplay.removeClass('list-view').addClass('thumbnail-view masonry-grid');
-                $('#thumbnailViewButton').addClass('active');
-                $('#listViewButton').removeClass('active');
-            } else {
-                fileDisplay.removeClass('thumbnail-view masonry-grid').addClass('list-view');
-                $('#listViewButton').addClass('active');
-                $('#thumbnailViewButton').removeClass('active');
+        const $files = $('#personalFiles .file-item').get();
+        $files.sort(function(a, b) {
+            let valA, valB;
+            if (sortName) {
+                valA = $(a).data('file-name').toLowerCase();
+                valB = $(b).data('file-name').toLowerCase();
+                return sortName === 'name-asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+            } else if (sortType) {
+                valA = $(a).data('document-type').toLowerCase();
+                valB = $(b).data('document-type').toLowerCase();
+                return valA.localeCompare(valB);
+            } else if (sortSource) {
+                valA = $(a).data('source');
+                valB = $(b).data('source');
+                return valA.localeCompare(valB);
             }
+            return 0;
+        });
+
+        if (isHardCopy) {
+            $files.filter(function() { return !$(this).data('hard-copy'); }).remove();
         }
 
-        function filterFilesByType() {
-            const typeFilter = $('#documentTypeFilter').val().toLowerCase();
-            $('#fileDisplay .file-item').each(function() {
-                const docType = $(this).data('document-type').toLowerCase();
-                $(this).toggle(typeFilter === '' || docType === typeFilter);
-            });
+        $('#personalFiles').empty().append($files);
+    }
+
+    function filterPersonalFilesByHardCopy() {
+        const isHardCopy = $('#hardCopyPersonalFilter').is(':checked');
+        $('#personalFiles .file-item').each(function() {
+            $(this).toggle($(this).data('hard-copy') || !isHardCopy);
+        });
+    }
+
+    function sortDepartmentFiles(deptId) {
+        const $grid = $('#departmentFiles-' + deptId);
+        const sortName = $grid.closest('.file-subsection').find('.sort-department-name').val();
+        const sortType = $grid.closest('.file-subsection').find('.sort-department-type').val();
+        const isHardCopy = $grid.closest('.file-subsection').find('.hard-copy-department-filter').is(':checked');
+
+        const $files = $grid.find('.file-item').get();
+        $files.sort(function(a, b) {
+            let valA, valB;
+            if (sortName) {
+                valA = $(a).data('file-name').toLowerCase();
+                valB = $(b).data('file-name').toLowerCase();
+                return sortName === 'name-asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+            } else if (sortType) {
+                valA = $(a).data('document-type').toLowerCase();
+                valB = $(b).data('document-type').toLowerCase();
+                return valA.localeCompare(valB);
+            }
+            return 0;
+        });
+
+        if (isHardCopy) {
+            $files.filter(function() { return !$(this).data('hard-copy'); }).remove();
         }
 
-        function filterFiles() {
-            const searchTerm = $('#fileSearch').val().toLowerCase();
-            const typeFilter = $('#documentTypeFilter').val().toLowerCase();
-            $('#fileDisplay .file-item').each(function() {
-                const fileName = $(this).data('file-name').toLowerCase();
-                const docType = $(this).data('document-type').toLowerCase();
-                const matchesSearch = fileName.includes(searchTerm);
-                const matchesType = typeFilter === '' || docType === typeFilter;
-                $(this).toggle(matchesSearch && matchesType);
-            });
-        }
-    </script>
+        $grid.empty().append($files);
+    }
+
+    function filterDepartmentFilesByHardCopy(deptId) {
+        const isHardCopy = $('#departmentFiles-' + deptId).closest('.file-subsection').find('.hard-copy-department-filter').is(':checked');
+        $('#departmentFiles-' + deptId + ' .file-item').each(function() {
+            $(this).toggle($(this).data('hard-copy') || !isHardCopy);
+        });
+    }
+
+    function filterFiles() {
+        const searchTerm = $('#fileSearch').val().toLowerCase();
+        $('#fileDisplay .file-item').each(function() {
+            const fileName = $(this).find('p').text().toLowerCase();
+            $(this).toggle(fileName.includes(searchTerm));
+        });
+    }
+
+    function filterFilesByType() {
+        const typeFilter = $('#documentTypeFilter').val().toLowerCase();
+        $('#fileDisplay .file-item').each(function() {
+            const docType = $(this).data('document-type').toLowerCase();
+            $(this).toggle(!typeFilter || docType === typeFilter);
+        });
+    }
+
+    function switchView(viewType) {
+        const $display = $('#fileDisplay');
+        $display.removeClass('thumbnail-view list-view').addClass(viewType + '-view');
+        $('#thumbnailViewButton').toggleClass('active', viewType === 'thumbnail');
+        $('#listViewButton').toggleClass('active', viewType === 'list');
+    }
+</script>
 </body>
-
 </html>
