@@ -242,8 +242,9 @@ $accessHistory = $accessHistoryStmt ? $accessHistoryStmt->fetchAll(PDO::FETCH_AS
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 </head>
 
+
 <body class="admin-dashboard">
-    <!-- Admin Sidebar -->
+    <!-- 
     <div class="sidebar">
         <button class="toggle-btn" title="Toggle Sidebar">
             <i class="fas fa-bars"></i>
@@ -285,6 +286,12 @@ $accessHistory = $accessHistoryStmt ? $accessHistoryStmt->fetchAll(PDO::FETCH_AS
                 <span class="link-text">Logout</span>
             </a>
     </div>
+ -->
+    
+<?php
+include 'steven.php';
+?>
+
     <div class="main-content">
         <h2>Welcome, <?php echo sanitizeHTML($admin['Username']); ?>!</h2>
         <div class="admin-stats">
