@@ -72,129 +72,111 @@ try {
     $notificationId = filter_var($_POST['notification_id'] ?? null, FILTER_VALIDATE_INT);
     $action = $_POST['action'] ?? null;
     $fileId = filter_var($_POST['file_id'] ?? null, FILTER_VALIDATE_INT);
+    $redirect = filter_var($_POST['redirect'] ?? '', FILTER_SANITIZE_URL);
+
+    if (!$notificationId || !$fileId || !$action || !in_array($action, ['accept', 'deny'])) {
+        sendResponse(false, 'Missing or invalid parameters', null, true, 400);
+    }
+
     $userId = validateUserSession();
 
-    if (!$notificationId || !$action || !$fileId || !in_array($action, ['accept', 'deny'])) {
-        sendResponse(false, 'Invalid request parameters', null, true, 400);
-    }
-
     global $pdo;
-
-    // Fetch transfer details
-    $stmt = $pdo->prepare("
-        SELECT t.*, f.File_name AS file_name, dt.Field_name AS document_type, u.Username AS sender_username, ud.Users_Department_id
-        FROM transaction t
-        JOIN files f ON t.File_id = f.File_id
-        LEFT JOIN documents_type_fields dt ON f.Document_type_id = dt.Document_type_id
-        LEFT JOIN users u ON t.User_id = u.User_id
-        LEFT JOIN users_department ud ON t.Users_Department_id = ud.Users_Department_id
-        WHERE t.File_id = ? AND t.Transaction_type = 2 AND t.Transaction_status = 'pending'
-        AND (t.User_id = ? OR ud.Users_Department_id IN (
-            SELECT Users_Department_id FROM users_department WHERE User_id = ?
-        ))
-    ");
-    $stmt->execute([$fileId, $userId, $userId]);
-    $transfer = $stmt->fetch(PDO::FETCH_ASSOC);
-
-    if (!$transfer) {
-        sendResponse(false, 'Transfer not found or already processed', null, true, 404);
-    }
-
-    $fileName = $transfer['file_name'];
-    $documentType = $transfer['document_type'] ?? 'Unknown Type';
-    $senderId = $transfer['User_id'];
-    $senderUsername = $transfer['sender_username'] ?? 'Unknown User';
-    $usersDepartmentId = $transfer['Users_Department_id'];
-    $grantsOwnership = true; // Simulated via transaction type 4
-    $redirect = $usersDepartmentId ? 'department_folder.php' : 'my-folder.php';
-
-    // Fetch recipient username
-    $stmt = $pdo->prepare("SELECT Username FROM users WHERE User_id = ?");
-    $stmt->execute([$userId]);
-    $username = $stmt->fetchColumn() ?: 'Unknown User';
-
     $pdo->beginTransaction();
-    try {
-        if ($action === 'accept') {
-            // Update transfer status
-            $stmt = $pdo->prepare("
-                UPDATE transaction 
-                SET Transaction_status = 'accepted', Time = NOW()
-                WHERE File_id = ? AND (User_id = ? OR Users_Department_id = ?)
-                AND Transaction_type = 2 AND Transaction_status = 'pending'
-            ");
-            $stmt->execute([$fileId, $userId, $usersDepartmentId]);
 
-            // Update notification status
-            $stmt = $pdo->prepare("
-                UPDATE transaction 
-                SET Transaction_status = 'accepted'
-                WHERE Transaction_id = ? AND User_id = ? AND Transaction_type = 12
-            ");
-            $stmt->execute([$notificationId, $userId]);
+    // Get file and sender details
+    $stmt = $pdo->prepare("
+        SELECT f.file_name, f.document_type_id, dt.type_name AS document_type, t.user_id AS sender_id, u.username
+        FROM transactions t
+        JOIN files f ON t.file_id = f.file_id
+        LEFT JOIN document_types dt ON f.document_type_id = dt.document_type_id
+        JOIN users u ON t.user_id = u.user_id
+        WHERE t.transaction_id = ? AND t.transaction_type = 'file_sent' AND t.description = 'pending'
+    ");
+    $stmt->execute([$notificationId]);
+    $fileDetails = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            // Grant co-ownership if applicable
-            if ($grantsOwnership && !$usersDepartmentId) {
-                $stmt = $pdo->prepare("
-                    INSERT INTO transaction (File_id, User_id, Transaction_status, Transaction_type, Time, Massage)
-                    VALUES (?, ?, 'accepted', 4, NOW(), ?)
-                ");
-                $stmt->execute([$fileId, $userId, "Co-ownership granted to $username"]);
-            }
-
-            $logMessage = $usersDepartmentId
-                ? "Accepted $documentType: $fileName for department"
-                : "Accepted $documentType: $fileName and became co-owner";
-            logActivity($userId, $logMessage, $fileId);
-
-            sendNotification(
-                $senderId,
-                "Your $documentType '$fileName' was accepted by $username",
-                $fileId,
-                'info'
-            );
-
-            sendResponse(true, 'File accepted successfully', $redirect, true, 200);
-        } elseif ($action === 'deny') {
-            // Update transfer status
-            $stmt = $pdo->prepare("
-                UPDATE transaction 
-                SET Transaction_status = 'denied', Time = NOW()
-                WHERE File_id = ? AND (User_id = ? OR Users_Department_id = ?)
-                AND Transaction_type = 2 AND Transaction_status = 'pending'
-            ");
-            $stmt->execute([$fileId, $userId, $usersDepartmentId]);
-
-            // Update notification status
-            $stmt = $pdo->prepare("
-                UPDATE transaction 
-                SET Transaction_status = 'denied'
-                WHERE Transaction_id = ? AND User_id = ? AND Transaction_type = 12
-            ");
-            $stmt->execute([$notificationId, $userId]);
-
-            $logMessage = $usersDepartmentId
-                ? "Denied $documentType: $fileName for department"
-                : "Denied $documentType: $fileName";
-            logActivity($userId, $logMessage, $fileId);
-
-            sendNotification(
-                $senderId,
-                "Your $documentType '$fileName' was denied by $username",
-                $fileId,
-                'info'
-            );
-
-            sendResponse(true, 'File denied successfully', $redirect, true, 200);
-        }
-
-        $pdo->commit();
-    } catch (Exception $e) {
+    if (!$fileDetails) {
         $pdo->rollBack();
-        error_log("Transaction error in handle_file_acceptance.php: " . $e->getMessage());
-        sendResponse(false, 'Error: ' . $e->getMessage(), null, true, 500);
+        sendResponse(false, 'Notification or file not found', null, true, 404);
     }
+
+    $fileName = $fileDetails['file_name'];
+    $documentType = $fileDetails['document_type'] ?? 'File';
+    $senderId = $fileDetails['sender_id'];
+    $username = $fileDetails['username'];
+
+    // Get user's department
+    $stmt = $pdo->prepare("SELECT users_department_id FROM users_department WHERE user_id = ? LIMIT 1");
+    $stmt->execute([$userId]);
+    $usersDepartmentId = $stmt->fetchColumn() ?: null;
+
+    if ($action === 'accept') {
+        // Update transfer status
+        $stmt = $pdo->prepare("
+            UPDATE transactions 
+            SET description = 'accepted', transaction_time = NOW()
+            WHERE file_id = ? AND (user_id = ? OR users_department_id = ?)
+            AND transaction_type = 'file_sent' AND description = 'pending'
+        ");
+        $stmt->execute([$fileId, $userId, $usersDepartmentId]);
+
+        // Update notification status
+        $stmt = $pdo->prepare("
+            UPDATE transactions 
+            SET description = 'accepted'
+            WHERE transaction_id = ? AND user_id = ? AND transaction_type = 'notification'
+        ");
+        $stmt->execute([$notificationId, $userId]);
+
+        $logMessage = $usersDepartmentId
+            ? "Accepted $documentType: $fileName for department"
+            : "Accepted $documentType: $fileName";
+        logActivity($userId, $logMessage, $fileId);
+
+        sendNotification(
+            $senderId,
+            "Your $documentType '$fileName' was accepted by $username",
+            $fileId,
+            'info'
+        );
+
+        sendResponse(true, 'File accepted successfully', $redirect, true, 200);
+    } elseif ($action === 'deny') {
+        // Update transfer status
+        $stmt = $pdo->prepare("
+            UPDATE transactions 
+            SET description = 'denied', transaction_time = NOW()
+            WHERE file_id = ? AND (user_id = ? OR users_department_id = ?)
+            AND transaction_type = 'file_sent' AND description = 'pending'
+        ");
+        $stmt->execute([$fileId, $userId, $usersDepartmentId]);
+
+        // Update notification status
+        $stmt = $pdo->prepare("
+            UPDATE transactions 
+            SET description = 'denied'
+            WHERE transaction_id = ? AND user_id = ? AND transaction_type = 'notification'
+        ");
+        $stmt->execute([$notificationId, $userId]);
+
+        $logMessage = $usersDepartmentId
+            ? "Denied $documentType: $fileName for department"
+            : "Denied $documentType: $fileName";
+        logActivity($userId, $logMessage, $fileId);
+
+        sendNotification(
+            $senderId,
+            "Your $documentType '$fileName' was denied by $username",
+            $fileId,
+            'info'
+        );
+
+        sendResponse(true, 'File denied successfully', $redirect, true, 200);
+    }
+
+    $pdo->commit();
 } catch (Exception $e) {
-    error_log("Error in handle_file_acceptance.php: " . $e->getMessage());
+    $pdo->rollBack();
+    error_log("Transaction error in handle_file_acceptance.php: " . $e->getMessage());
     sendResponse(false, 'Error: ' . $e->getMessage(), null, true, 500);
 }

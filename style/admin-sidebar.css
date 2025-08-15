@@ -1,0 +1,286 @@
+/* Admin Sidebar Styles */
+
+/* Custom Properties for Theming */
+:root {
+    --primary-color: #50c878;
+    --primary-hover: #40a867;
+    --secondary-color: #2c3e50;
+    --secondary-hover: #1a252f;
+    --background-color: #f7fafc;
+    --card-background: #ffffff;
+    --text-color: #2d3748;
+    --text-secondary: #718096;
+    --border-color: #e2e8f0;
+    --shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    --danger-color: #e53e3e;
+    --success-color: #68d391;
+    --border-radius: 8px;
+    --transition: all 0.3s ease;
+}
+
+/* Sidebar Styles */
+.sidebar {
+    width: 260px;
+    background: linear-gradient(220deg, #1a1a1a, var(--secondary-color));
+    height: 100vh;
+    padding: 20px;
+    color: #ffffff;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 2px 0 10px rgba(0, 0, 0, 0.3);
+    transition: width var(--transition), transform var(--transition);
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 1200; /* Increased to ensure it stays above all content */
+    overflow-y: auto; /* Enable internal scrolling for long content */
+    scrollbar-width: thin;
+    scrollbar-color: var(--primary-color) var(--secondary-color);
+}
+
+.sidebar::-webkit-scrollbar {
+    width: 6px;
+}
+
+.sidebar::-webkit-scrollbar-track {
+    background: var(--secondary-color);
+}
+
+.sidebar::-webkit-scrollbar-thumb {
+    background: var(--primary-color);
+    border-radius: 3px;
+}
+
+.sidebar.minimized {
+    width: 60px;
+}
+
+.sidebar.active {
+    transform: translateX(0) !important;
+}
+
+.sidebar h2 {
+    text-align: center;
+    font-size: 24px;
+    margin-bottom: 20px;
+    color: var(--primary-color);
+    font-weight: 700;
+    letter-spacing: 1px;
+    transition: opacity var(--transition), height var(--transition);
+}
+
+.sidebar.minimized h2 {
+    opacity: 0;
+    height: 0;
+    margin: 0;
+}
+
+.sidebar .toggle-btn {
+    background: none;
+    border: none;
+    color: #ffffff;
+    cursor: pointer;
+    font-size: 24px;
+    margin-bottom: 20px;
+    padding: 8px;
+    border-radius: var(--border-radius);
+    transition: var(--transition);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.sidebar .toggle-btn:hover,
+.sidebar .toggle-btn:focus {
+    background: rgba(255, 255, 255, 0.1);
+    transform: scale(1.1);
+    color: var(--primary-color);
+    outline: none;
+}
+
+.sidebar a,
+.sidebar .logout-btn,
+.sidebar .admin-mode-btn,
+.sidebar .client-btn {
+    display: flex;
+    align-items: center;
+    padding: 12px;
+    color: #ffffff;
+    text-decoration: none;
+    font-size: 16px;
+    font-weight: 500;
+    border-radius: var(--border-radius);
+    margin-bottom: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    transition: var(--transition);
+    position: relative;
+}
+
+.sidebar a i,
+.sidebar .logout-btn i,
+.sidebar .admin-mode-btn i,
+.sidebar .client-btn i {
+    margin-right: 12px;
+    width: 24px;
+    font-size: 18px;
+    text-align: center;
+    color: var(--primary-color);
+    transition: var(--transition);
+}
+
+.sidebar a.active {
+    background: rgba(255, 255, 255, 0.1);
+    border-left: 4px solid var(--primary-color);
+    padding-left: 8px;
+}
+
+.sidebar a.active i {
+    color: #ffffff;
+}
+
+.sidebar a:hover,
+.sidebar .logout-btn:hover,
+.sidebar .admin-mode-btn:hover,
+.sidebar .client-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+    transform: translateX(4px);
+}
+
+.sidebar a:hover i,
+.sidebar .logout-btn:hover i,
+.sidebar .admin-mode-btn:hover i,
+.sidebar .client-btn:hover i {
+    color: #ffffff;
+}
+
+.sidebar.minimized a,
+.sidebar.minimized .logout-btn,
+.sidebar.minimized .admin-mode-btn,
+.sidebar.minimized .client-btn {
+    justify-content: center;
+    padding: 12px 0;
+}
+
+.sidebar.minimized a i,
+.sidebar.minimized .logout-btn i,
+.sidebar.minimized .admin-mode-btn i,
+.sidebar.minimized .client-btn i {
+    margin-right: 0;
+}
+
+.sidebar.minimized .link-text {
+    display: none;
+}
+
+.sidebar.minimized a:hover::after,
+.sidebar.minimized .logout-btn:hover::after,
+.sidebar.minimized .admin-mode-btn:hover::after,
+.sidebar.minimized .client-btn:hover::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    left: 70px;
+    background: var(--secondary-color);
+    color: #ffffff;
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    white-space: nowrap;
+    z-index: 1300;
+}
+
+/* Admin Mode Button */
+.admin-mode-btn {
+    background: rgba(80, 200, 120, 0.2);
+    border: 2px solid var(--primary-color);
+}
+
+.admin-mode-btn:hover {
+    background: rgba(80, 200, 120, 0.3);
+    border-color: var(--primary-hover);
+}
+
+/* Client Button */
+.client-btn {
+    background: rgba(80, 200, 120, 0.2);
+    border: 2px solid var(--primary-color);
+}
+
+.client-btn:hover {
+    background: rgba(80, 200, 120, 0.3);
+    border-color: var(--primary-hover);
+}
+
+/* Logout Button */
+.logout-btn {
+    margin-top: auto;
+    background: rgba(229, 62, 62, 0.2);
+    border: 2px solid var(--danger-color);
+}
+
+.logout-btn:hover {
+    background: rgba(229, 62, 62, 0.3);
+}
+
+/* Accessibility */
+.sidebar a:focus,
+.sidebar .logout-btn:focus,
+.sidebar .admin-mode-btn:focus,
+.sidebar .client-btn:focus,
+.sidebar .toggle-btn:focus {
+    outline: 2px solid #ffffff;
+    outline-offset: 2px;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .sidebar {
+        width: 260px;
+        transform: translateX(-100%);
+        height: 100vh; /* Ensure full height on mobile */
+        overflow-y: auto; /* Allow scrolling within sidebar */
+    }
+
+    .sidebar.active {
+        transform: translateX(0);
+        width: 260px;
+    }
+
+    .sidebar.minimized {
+        transform: translateX(-100%);
+        width: 60px;
+    }
+
+    .sidebar h2,
+    .sidebar .link-text {
+        display: block;
+    }
+
+    .sidebar a,
+    .sidebar .logout-btn,
+    .sidebar .admin-mode-btn,
+    .sidebar .client-btn {
+        justify-content: flex-start;
+    }
+
+    .sidebar a i,
+    .sidebar .logout-btn i,
+    .sidebar .admin-mode-btn i,
+    .sidebar .client-btn i {
+        margin-right: 12px;
+    }
+}
+
+@media (max-width: 480px) {
+    .sidebar {
+        width: 100%;
+        transform: translateX(-100%);
+    }
+
+    .sidebar.active {
+        width: 100%;
+    }
+
+    .sidebar.minimized {
+        width: 60px;
+    }
+}

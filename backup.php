@@ -62,11 +62,12 @@ $display_hour = $backup_hour % 12 ?: 12;
 $am_pm = $backup_hour >= 12 ? 'PM' : 'AM';
 
 // Function to create database backup
-function createBackup($pdo, $backupDir, $isAuto = false) {
+function createBackup($pdo, $backupDir, $isAuto = false)
+{
     try {
         $tables = $pdo->query('SHOW TABLES')->fetchAll(PDO::FETCH_COLUMN);
-        
-        $output = "-- Database Backup for water_dispenser_system\n";
+
+        $output = "-- Database Backup for arc-hive-maindb\n"; // Updated database name
         $output .= "-- Generated: " . date('Y-m-d H:i:s') . "\n";
         $output .= "-- Type: " . ($isAuto ? 'Automatic' : 'Manual') . "\n\n";
 
@@ -79,7 +80,7 @@ function createBackup($pdo, $backupDir, $isAuto = false) {
             if (!empty($rows)) {
                 $output .= "-- Data for $table\n";
                 foreach ($rows as $row) {
-                    $values = array_map(function($value) use ($pdo) {
+                    $values = array_map(function ($value) use ($pdo) {
                         return $value === null ? 'NULL' : $pdo->quote($value);
                     }, array_values($row));
                     $output .= "INSERT INTO `$table` VALUES (" . implode(',', $values) . ");\n";
@@ -90,11 +91,11 @@ function createBackup($pdo, $backupDir, $isAuto = false) {
 
         $prefix = $isAuto ? 'auto_backup_' : 'manual_backup_';
         $filename = $backupDir . $prefix . date('Y-m-d_H-i-s') . '.sql';
-        
+
         if (!file_put_contents($filename, $output)) {
             throw new Exception("Failed to write backup file");
         }
-        
+
         // Implement retention policy: keep last 7 days of backups
         $retentionPeriod = 7 * 24 * 60 * 60;
         $backupFiles = glob($backupDir . '*.sql');
@@ -103,7 +104,7 @@ function createBackup($pdo, $backupDir, $isAuto = false) {
                 unlink($file);
             }
         }
-        
+
         return $filename;
     } catch (Exception $e) {
         error_log("Backup creation failed: " . $e->getMessage());
@@ -172,7 +173,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_settings'])) {
         $settings['last_backup'] = null; // Reset last backup to allow new backup
         file_put_contents($settingsFile, json_encode($settings, JSON_PRETTY_PRINT));
         $notification = 'success|Automatic backup settings updated successfully.';
-        
+
         // Update display variables
         $display_hour = $backup_hour_24 % 12 ?: 12;
         $am_pm = $backup_hour_24 >= 12 ? 'PM' : 'AM';
@@ -214,6 +215,7 @@ if ($next_backup <= $now) {
 
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -222,6 +224,7 @@ if ($next_backup <= $now) {
     <link rel="stylesheet" href="admin-sidebar.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
 </head>
+
 <body class="admin-dashboard">
     <!-- Admin Sidebar -->
     <div class="sidebar">
@@ -272,11 +275,11 @@ if ($next_backup <= $now) {
             <div class="content-wrapper">
                 <!-- Notification Toast -->
                 <?php if ($notification): ?>
-                <div class="notification-toast <?= explode('|', $notification)[0] ?>">
-                    <?= explode('|', $notification)[1] ?>
-                </div>
+                    <div class="notification-toast <?= explode('|', $notification)[0] ?>">
+                        <?= explode('|', $notification)[1] ?>
+                    </div>
                 <?php endif; ?>
-                
+
                 <!-- Loading Indicator -->
                 <div id="loadingIndicator" style="display: none;" class="notification-toast">
                     Creating automatic backup...
@@ -342,8 +345,8 @@ if ($next_backup <= $now) {
                             <tbody id="backupsTableBody">
                                 <?php foreach ($backupFiles as $file): ?>
                                     <?php
-                                        $filename = basename($file);
-                                        $isAuto = strpos($filename, 'auto_backup_') === 0;
+                                    $filename = basename($file);
+                                    $isAuto = strpos($filename, 'auto_backup_') === 0;
                                     ?>
                                     <tr>
                                         <td><?php echo htmlspecialchars($filename); ?></td>
@@ -400,7 +403,7 @@ if ($next_backup <= $now) {
             padding: 15px;
             background: #fff;
             border-radius: 6px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
 
         .current-time h3 {
@@ -421,7 +424,7 @@ if ($next_backup <= $now) {
             border-radius: 6px;
             color: white;
             font-weight: 500;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
             z-index: 1100;
             animation: slideIn 0.3s, fadeOut 0.5s 2.5s forwards;
         }
@@ -594,6 +597,7 @@ if ($next_backup <= $now) {
                 transform: translateX(100%);
                 opacity: 0;
             }
+
             to {
                 transform: translateX(0);
                 opacity: 1;
@@ -604,6 +608,7 @@ if ($next_backup <= $now) {
             from {
                 opacity: 1;
             }
+
             to {
                 opacity: 0;
             }
@@ -666,7 +671,7 @@ if ($next_backup <= $now) {
                 if (amPmInput === 'AM' && hour === 12) hour = 0;
                 const scheduledDateTime = new Date(`${dateInput}T${hour.toString().padStart(2, '0')}:${minuteInput.padStart(2, '0')}:00`);
                 scheduledTime = scheduledDateTime;
-                
+
                 // Update next backup display
                 const nextBackup = document.getElementById('nextBackup');
                 nextBackup.textContent = scheduledTime.toLocaleString('en-PH', {
@@ -684,11 +689,13 @@ if ($next_backup <= $now) {
         function checkSchedule() {
             if (scheduledTime) {
                 const now = new Date();
-                const nowInManila = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Manila' }));
+                const nowInManila = new Date(now.toLocaleString('en-US', {
+                    timeZone: 'Asia/Manila'
+                }));
                 if (nowInManila.getTime() >= scheduledTime.getTime()) {
                     const loadingIndicator = document.getElementById('loadingIndicator');
                     loadingIndicator.style.display = 'block';
-                    
+
                     fetch('backup.php?check_auto_backup=1')
                         .then(response => {
                             if (response.headers.get('content-type')?.includes('application/octet-stream')) {
@@ -701,7 +708,10 @@ if ($next_backup <= $now) {
                                     a.click();
                                     document.body.removeChild(a);
                                     window.URL.revokeObjectURL(url);
-                                    return { status: 'success', message: 'Automatic backup created and downloaded' };
+                                    return {
+                                        status: 'success',
+                                        message: 'Automatic backup created and downloaded'
+                                    };
                                 });
                             }
                             return response.json();
@@ -715,7 +725,7 @@ if ($next_backup <= $now) {
                             setTimeout(() => {
                                 toast.remove();
                             }, 3000);
-                            
+
                             if (data.status === 'success') {
                                 // Refresh backup list
                                 fetchBackupList();
@@ -770,7 +780,7 @@ if ($next_backup <= $now) {
             const minute = document.getElementById('backup_minute').value;
             const ampm = document.querySelector('select[name="am_pm"]').value;
             const date = document.getElementById('backup_date').value;
-            
+
             if (hour < 1 || hour > 12 || minute < 0 || minute > 59 || !['AM', 'PM'].includes(ampm) || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
                 alert('Invalid input. Please use hours 1-12, minutes 0-59, valid AM/PM, and date in YYYY-MM-DD format.');
                 return false;
@@ -796,14 +806,14 @@ if ($next_backup <= $now) {
                     toast.style.display = 'none';
                 }, 3000);
             }
-            
+
             // Initialize scheduled time
             setScheduledTime();
-            
+
             // Update time every second
             updateTime();
             setInterval(updateTime, 1000);
-            
+
             // Check schedule every second
             setInterval(checkSchedule, 1000);
 
@@ -814,4 +824,5 @@ if ($next_backup <= $now) {
         });
     </script>
 </body>
+
 </html>

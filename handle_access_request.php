@@ -60,7 +60,7 @@ function validateCsrfToken(string $csrfToken): bool
 }
 
 /**
- * Sends an access notification using the transaction table.
+ * Sends an access notification using the transactions table.
  *
  * @param int $userId
  * @param string $message
@@ -72,12 +72,12 @@ function sendAccessNotification(int $userId, string $message, ?int $fileId, stri
 {
     global $pdo;
     try {
-        $status = ($type === 'access_request') ? 'pending' : 'completed';
+        $description = ($type === 'access_request') ? 'pending' : 'completed';
         $stmt = $pdo->prepare("
-            INSERT INTO transaction (User_id, File_id, Transaction_status, Transaction_type, Time, Massage)
-            VALUES (?, ?, ?, 12, NOW(), ?)
+            INSERT INTO transactions (user_id, file_id, transaction_type, transaction_time, description)
+            VALUES (?, ?, 'notification', NOW(), ?)
         ");
-        return $stmt->execute([$userId, $fileId, $status, $message]);
+        return $stmt->execute([$userId, $fileId, $message]);
     } catch (PDOException $e) {
         error_log("Database error in sendAccessNotification: " . $e->getMessage());
         return false;
@@ -89,135 +89,100 @@ try {
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         sendResponse(false, 'Invalid request method.', 405);
     }
-    $data = json_decode(file_get_contents('php://input'), true);
-    if (!$data || !isset($data['csrf_token']) || !validateCsrfToken($data['csrf_token'])) {
+    if (!isset($_POST['csrf_token']) || !validateCsrfToken($_POST['csrf_token'])) {
         sendResponse(false, 'Invalid CSRF token.', 403);
-    }
-
-    $action = $data['action'] ?? null;
-    $fileId = filter_var($data['file_id'] ?? null, FILTER_VALIDATE_INT);
-    if (!$action || !$fileId || $fileId <= 0) {
-        sendResponse(false, 'Action and file ID are required.', 400);
     }
 
     $user = validateUserSession();
     $userId = $user['user_id'];
     $username = $user['username'];
 
-    global $pdo;
+    $fileId = filter_var($_POST['file_id'] ?? null, FILTER_VALIDATE_INT);
+    $action = filter_var($_POST['action'] ?? null, FILTER_SANITIZE_STRING);
 
-    if ($action === 'request') {
-        // Check file existence and owner
-        $stmt = $pdo->prepare("SELECT User_id, File_name FROM files WHERE File_id = ? AND File_status != 'deleted'");
-        $stmt->execute([$fileId]);
-        $file = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!$file) {
-            sendResponse(false, 'File not found.', 404);
-        }
-        $fileOwner = (int)$file['User_id'];
-        $fileName = $file['File_name'];
-
-        // Check for existing request
-        $stmt = $pdo->prepare("
-            SELECT Transaction_id 
-            FROM transaction 
-            WHERE User_id = ? AND File_id = ? AND Transaction_type = 11 AND Transaction_status = 'pending'
-        ");
-        $stmt->execute([$userId, $fileId]);
-        if ($stmt->fetchColumn()) {
-            sendResponse(false, 'You have already requested access to this file.', 400);
-        }
-
-        // Insert access request
-        $stmt = $pdo->prepare("
-            INSERT INTO transaction (User_id, File_id, Transaction_status, Transaction_type, Time, Massage)
-            VALUES (?, ?, 'pending', 11, NOW(), ?)
-        ");
-        if (!$stmt->execute([$userId, $fileId, "Access request for file: $fileName"])) {
-            sendResponse(false, 'Failed to create access request.', 500);
-        }
-
-        // Notify owner
-        $ownerMessage = "User $username has requested access to your file: $fileName.";
-        if (!sendAccessNotification($fileOwner, $ownerMessage, $fileId, 'access_request')) {
-            error_log("Failed to notify owner ID: $fileOwner for request of file: $fileName");
-        }
-
-        logActivity($userId, "Requested access to file '$fileName' owned by user ID $fileOwner", $fileId);
-        sendResponse(true, 'Access request sent successfully.', 200);
-    } elseif ($action === 'approve' || $action === 'reject') {
-        // Check access request
-        $stmt = $pdo->prepare("
-            SELECT t.*, f.File_name, u.Username AS requester_username 
-            FROM transaction t 
-            JOIN files f ON t.File_id = f.File_id 
-            JOIN users u ON t.User_id = u.User_id 
-            WHERE t.File_id = ? AND f.User_id = ? AND t.Transaction_type = 11 AND t.Transaction_status = 'pending'
-        ");
-        $stmt->execute([$fileId, $userId]);
-        $accessRequest = $stmt->fetch(PDO::FETCH_ASSOC);
-
-        if (!$accessRequest) {
-            sendResponse(false, 'Access request not found or already processed.', 404);
-        }
-
-        $accessRequestId = $accessRequest['Transaction_id'];
-        $fileName = $accessRequest['File_name'];
-        $requesterId = $accessRequest['User_id'];
-        $requesterUsername = $accessRequest['requester_username'];
-        $newStatus = $action === 'approve' ? 'approved' : 'rejected';
-
-        // Update access request
-        $stmt = $pdo->prepare("
-            UPDATE transaction 
-            SET Transaction_status = ?, Time = NOW()
-            WHERE Transaction_id = ?
-        ");
-        if (!$stmt->execute([$newStatus, $accessRequestId])) {
-            sendResponse(false, 'Failed to update access request status.', 500);
-        }
-
-        // Update notification
-        $stmt = $pdo->prepare("
-            UPDATE transaction 
-            SET Transaction_status = ? 
-            WHERE File_id = ? AND User_id = ? AND Transaction_type = 12 AND Transaction_status = 'pending'
-        ");
-        if (!$stmt->execute([$newStatus, $fileId, $userId])) {
-            error_log("Failed to update notification status for file ID: $fileId, user ID: $userId");
-        }
-
-        // Notify requester
-        $requesterMessage = "Your access request for file '$fileName' has been $newStatus by $username.";
-        if (!sendAccessNotification($requesterId, $requesterMessage, $fileId, 'access_result')) {
-            error_log("Failed to notify requester ID: $requesterId, Message: $requesterMessage");
-        }
-
-        logActivity($userId, "You have $newStatus the access request from $requesterUsername for your file '$fileName'", $fileId);
-
-        if ($action === 'approve') {
-            // Grant access via file transfer
-            $stmt = $pdo->prepare("
-                INSERT INTO transaction (File_id, User_id, Transaction_status, Transaction_type, Time, Massage)
-                VALUES (?, ?, 'accepted', 2, NOW(), ?)
-            ");
-            if (!$stmt->execute([$fileId, $requesterId, "File access granted to $requesterUsername"])) {
-                sendResponse(false, 'Failed to grant file access to requester.', 500);
-            }
-
-            // Grant co-ownership
-            $stmt = $pdo->prepare("
-                INSERT INTO transaction (File_id, User_id, Transaction_status, Transaction_type, Time, Massage)
-                VALUES (?, ?, 'accepted', 4, NOW(), ?)
-            ");
-            $stmt->execute([$fileId, $requesterId, "Co-ownership granted to $requesterUsername"]);
-        }
-
-        sendResponse(true, "Access request $newStatus successfully.", 200);
-    } else {
-        sendResponse(false, 'Invalid action.', 400);
+    if (!$fileId || !$action || !in_array($action, ['approve', 'deny'])) {
+        sendResponse(false, 'Missing or invalid parameters.', 400);
     }
+
+    $pdo->beginTransaction();
+
+    // Verify file ownership
+    $stmt = $pdo->prepare("
+        SELECT file_name, user_id AS owner_id
+        FROM files
+        WHERE file_id = ? AND user_id = ?
+    ");
+    $stmt->execute([$fileId, $userId]);
+    $file = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$file) {
+        $pdo->rollBack();
+        sendResponse(false, 'File not found or unauthorized.', 404);
+    }
+
+    $fileName = $file['file_name'];
+    $ownerId = $file['owner_id'];
+
+    // Get requester details
+    $stmt = $pdo->prepare("
+        SELECT u.user_id, u.username
+        FROM transactions t
+        JOIN users u ON t.user_id = u.user_id
+        WHERE t.file_id = ? AND t.transaction_type = 'file_request' AND t.description = 'pending'
+    ");
+    $stmt->execute([$fileId]);
+    $requester = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$requester) {
+        $pdo->rollBack();
+        sendResponse(false, 'No pending access request found for this file.', 404);
+    }
+
+    $requesterId = $requester['user_id'];
+    $requesterUsername = $requester['username'];
+
+    $newStatus = ($action === 'approve') ? 'accepted' : 'denied';
+
+    // Update notification status
+    $stmt = $pdo->prepare("
+        UPDATE transactions 
+        SET description = ? 
+        WHERE file_id = ? AND user_id = ? AND transaction_type = 'notification' AND description = 'pending'
+    ");
+    if (!$stmt->execute([$newStatus, $fileId, $userId])) {
+        error_log("Failed to update notification status for file ID: $fileId, user ID: $userId");
+    }
+
+    // Notify requester
+    $requesterMessage = "Your access request for file '$fileName' has been $newStatus by $username.";
+    if (!sendAccessNotification($requesterId, $requesterMessage, $fileId, 'access_result')) {
+        error_log("Failed to notify requester ID: $requesterId, Message: $requesterMessage");
+    }
+
+    logActivity($userId, "You have $newStatus the access request from $requesterUsername for your file '$fileName'", $fileId);
+
+    if ($action === 'approve') {
+        // Grant access via file transfer
+        $stmt = $pdo->prepare("
+            INSERT INTO transactions (file_id, user_id, transaction_type, transaction_time, description)
+            VALUES (?, ?, 'file_sent', NOW(), ?)
+        ");
+        if (!$stmt->execute([$fileId, $requesterId, "File access granted to $requesterUsername"])) {
+            sendResponse(false, 'Failed to grant file access to requester.', 500);
+        }
+
+        // Grant co-ownership
+        $stmt = $pdo->prepare("
+            INSERT INTO transactions (file_id, user_id, transaction_type, transaction_time, description)
+            VALUES (?, ?, 'co-ownership', NOW(), ?)
+        ");
+        $stmt->execute([$fileId, $requesterId, "Co-ownership granted to $requesterUsername"]);
+    }
+
+    $pdo->commit();
+    sendResponse(true, "Access request $newStatus successfully.", 200);
 } catch (Exception $e) {
+    $pdo->rollBack();
     error_log("Error in handle_access_request.php: " . $e->getMessage());
     sendResponse(false, 'Server error: ' . $e->getMessage(), 500);
 }

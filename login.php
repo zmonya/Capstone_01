@@ -18,7 +18,7 @@ if (empty($_SESSION['csrf_token'])) {
 $csrf_token = $_SESSION['csrf_token'];
 
 /**
- * Log login attempt to transaction table
+ * Log login attempt to transactions table
  * @param PDO $pdo Database connection
  * @param int $user_id User ID or null if failed
  * @param string $status Success or Failure
@@ -28,12 +28,12 @@ function logLoginAttempt($pdo, $user_id, $status, $message)
 {
     try {
         $stmt = $pdo->prepare("
-            INSERT INTO transaction (User_id, Transaction_status, Transaction_type, Time, Massage)
-            VALUES (?, ?, ?, NOW(), ?)
+            INSERT INTO transactions (user_id, transaction_type, transaction_time, description)
+            VALUES (?, ?, NOW(), ?)
         ");
-        // Transaction_type: 1 for success, 2 for failure
-        $transaction_type = ($status === 'Success') ? 1 : 2;
-        $stmt->execute([$user_id, $status, $transaction_type, $message]);
+        // transaction_type: 'login_success' for success, 'login_failure' for failure
+        $transaction_type = ($status === 'Success') ? 'login_success' : 'login_failure';
+        $stmt->execute([$user_id, $transaction_type, $message]);
     } catch (PDOException $e) {
         error_log("Failed to log login attempt: " . $e->getMessage(), 3, 'error_log.log');
     }
@@ -49,12 +49,12 @@ function getUserDepartments($pdo, $user_id)
 {
     try {
         $stmt = $pdo->prepare("
-            SELECT Department_id 
+            SELECT department_id 
             FROM users_department 
-            WHERE User_id = ?
+            WHERE user_id = ?
         ");
         $stmt->execute([$user_id]);
-        return array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'Department_id');
+        return array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'department_id');
     } catch (PDOException $e) {
         error_log("Failed to fetch departments: " . $e->getMessage(), 3, 'error_log.log');
         return [];
@@ -79,31 +79,31 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             try {
                 // Fetch user from database
                 $stmt = $pdo->prepare("
-                    SELECT User_id, Username, Password, Role, Position 
+                    SELECT user_id, username, password, role, position 
                     FROM users 
-                    WHERE Username = ?
+                    WHERE username = ?
                 ");
                 $stmt->execute([$username]);
                 $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
-                if ($user && password_verify($password, $user['Password'])) {
+                if ($user && password_verify($password, $user['password'])) {
                     // Regenerate session ID for security
                     session_regenerate_id(true);
 
                     // Set session variables
-                    $_SESSION['user_id'] = $user['User_id'];
-                    $_SESSION['username'] = $user['Username'];
-                    $_SESSION['role'] = $user['Role'];
-                    $_SESSION['position'] = $user['Position'];
-                    $_SESSION['departments'] = getUserDepartments($pdo, $user['User_id']);
+                    $_SESSION['user_id'] = $user['user_id'];
+                    $_SESSION['username'] = $user['username'];
+                    $_SESSION['role'] = $user['role'];
+                    $_SESSION['position'] = $user['position'];
+                    $_SESSION['departments'] = getUserDepartments($pdo, $user['user_id']);
                     // No sub_departments table in schema, set as empty
                     $_SESSION['sub_departments'] = [];
 
                     // Log successful login
-                    logLoginAttempt($pdo, $user['User_id'], 'Success', 'User logged in successfully');
+                    logLoginAttempt($pdo, $user['user_id'], 'Success', 'User logged in successfully');
 
                     // Redirect based on role
-                    $redirect = ($user['Role'] === 'admin') ? 'admin_dashboard.php' : 'Dashboard.php';
+                    $redirect = ($user['role'] === 'admin') ? 'admin_dashboard.php' : 'Dashboard.php';
                     header("Location: $redirect");
                     exit();
                 } else {

@@ -10,7 +10,7 @@ $dotenv = Dotenv::createImmutable(__DIR__);
 $dotenv->load();
 
 /**
- * Sends a notification for access request actions or results using the transaction table.
+ * Sends a notification for access request actions or results using the transactions table.
  *
  * @param int $userId The user to notify
  * @param string $message The notification message
@@ -22,12 +22,12 @@ function sendAccessNotification(int $userId, string $message, ?int $fileId, stri
 {
     global $pdo;
     try {
-        $status = ($type === 'access_request') ? 'pending' : 'completed';
+        $description = ($type === 'access_request') ? 'pending' : 'completed';
         $stmt = $pdo->prepare("
-            INSERT INTO transaction (User_id, File_id, Transaction_status, Transaction_type, Time, Massage)
-            VALUES (?, ?, ?, 12, NOW(), ?)
+            INSERT INTO transactions (user_id, file_id, transaction_type, transaction_time, description)
+            VALUES (?, ?, 'notification', NOW(), ?)
         ");
-        return $stmt->execute([$userId, $fileId, $status, $message]);
+        return $stmt->execute([$userId, $fileId, $message]);
     } catch (PDOException $e) {
         error_log("Database error in sendAccessNotification: " . $e->getMessage());
         return false;

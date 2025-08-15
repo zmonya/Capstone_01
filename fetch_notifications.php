@@ -8,12 +8,12 @@ $userId = filter_var($_SESSION['user_id'], FILTER_SANITIZE_NUMBER_INT);
 
 try {
     $stmt = $pdo->prepare("
-        SELECT t.Transaction_id AS id, t.File_id, t.Transaction_status AS status, t.Time AS timestamp, t.Massage AS message
-        FROM transaction t
-        LEFT JOIN files f ON t.File_id = f.File_id
-        WHERE t.User_id = ? AND t.Transaction_type = 12
-        AND (f.File_status != 'deleted' OR f.File_id IS NULL)
-        ORDER BY t.Time DESC
+        SELECT t.transaction_id AS id, t.file_id, t.description AS status, t.transaction_time AS timestamp, t.description AS message
+        FROM transactions t
+        LEFT JOIN files f ON t.file_id = f.file_id
+        WHERE t.user_id = ? AND t.transaction_type = 'notification'
+        AND (f.file_status != 'deleted' OR f.file_id IS NULL)
+        ORDER BY t.transaction_time DESC
         LIMIT 5
     ");
     $stmt->execute([$userId]);

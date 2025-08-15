@@ -2,7 +2,7 @@
 require 'db_connection.php';
 
 /**
- * Sends a notification to a user by logging it in the transaction table.
+ * Sends a notification to a user by logging it in the transactions table.
  *
  * @param int $userId The ID of the user to notify.
  * @param string $message The notification message.
@@ -15,10 +15,10 @@ function sendNotification(int $userId, string $message, ?int $fileId = null, str
     global $pdo;
 
     $stmt = $pdo->prepare("
-        INSERT INTO transaction (User_id, File_id, Transaction_status, Transaction_type, Time, Massage)
-        VALUES (?, ?, 'pending', ?, NOW(), ?)
+        INSERT INTO transactions (user_id, file_id, transaction_type, transaction_time, description)
+        VALUES (?, ?, ?, NOW(), ?)
     ");
-    $stmt->execute([$userId, $fileId, getTransactionType('notification'), $message]);
+    $stmt->execute([$userId, $fileId, 'notification', $message]);
 }
 
 /**
@@ -34,7 +34,7 @@ function sendNotificationToDepartment(int $departmentId, string $message, ?int $
 {
     global $pdo;
 
-    $stmt = $pdo->prepare("SELECT User_id FROM users_department WHERE Department_id = ?");
+    $stmt = $pdo->prepare("SELECT user_id FROM users_department WHERE department_id = ?");
     $stmt->execute([$departmentId]);
     $departmentUsers = $stmt->fetchAll(PDO::FETCH_COLUMN);
 

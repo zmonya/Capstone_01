@@ -75,14 +75,27 @@ function ensureUploadDirectory(): string
 
 try {
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-        throw new Exception('Invalid request method.');
+        throw new Exception('Invalid request method.', 405);
     }
 
     if (!isset($_SESSION['user_id'])) {
-        generateResponse(false, 'User not authenticated.', [], 401);
+        throw new Exception('User not authenticated.', 401);
+    }
+
+    if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'])) {
+        throw new Exception('Invalid CSRF token.', 403);
     }
 
     $fileDetails = validateFile($_FILES['file'] ?? []);
+    $documentTypeId = filter_var($_POST['document_type_id'] ?? null, FILTER_VALIDATE_INT) ?: null;
+    $parentFileId = filter_var($_POST['parent_file_id'] ?? null, FILTER_VALIDATE_INT) ?: null;
+    $metaData = filter_var($_POST['meta_data'] ?? '', FILTER_SANITIZE_STRING) ?: null;
+    $physicalStorage = filter_var($_POST['physical_storage'] ?? '', FILTER_SANITIZE_STRING) ?: null;
+    $copyType = filter_var($_POST['copy_type'] ?? '', FILTER_SANITIZE_STRING) ?: null;
+
+    if ($physicalStorage && !preg_match('/^[A-Z][0-9]+(\/[A-Z][0-9]+){3}$/', $physicalStorage)) {
+        throw new Exception('Invalid physical storage path format.');
+    }
 
     $uploadDir = ensureUploadDirectory();
     $fileNamePrefix = bin2hex(random_bytes(8)) . '_' . $fileDetails['safe_name'];
@@ -92,24 +105,53 @@ try {
         throw new Exception('Failed to move uploaded file.');
     }
 
-    // Insert file record into database (simplified)
+    // Insert file record into database
     global $pdo;
     $stmt = $pdo->prepare("
-        INSERT INTO files (File_name, File_path, User_id, File_size, File_type, File_status)
-        VALUES (?, ?, ?, ?, ?, 'active')
+        INSERT INTO files (
+            file_name, file_path, user_id, file_size, file_type, file_status,
+            parent_file_id, meta_data, upload_date, document_type_id, physical_storage_path, copy_type
+        )
+        VALUES (?, ?, ?, ?, ?, 'active', ?, ?, NOW(), ?, ?, ?)
     ");
-    $relativeFilePath = 'uploads/' . $fileNamePrefix;
+    $relativeFilePath = 'Uploads/' . $fileNamePrefix;
     $stmt->execute([
         $fileDetails['name'],
         $relativeFilePath,
         $_SESSION['user_id'],
         $fileDetails['size'],
-        $fileDetails['type']
+        $fileDetails['type'],
+        $parentFileId,
+        $metaData ?: null, // Use null if empty
+        $documentTypeId,
+        $physicalStorage ?: null, // Use null if empty
+        $copyType ?: null // Use null if empty
     ]);
     $fileId = $pdo->lastInsertId();
+
+    // Log the upload transaction
+    $stmt = $pdo->prepare("
+        INSERT INTO transactions (user_id, file_id, transaction_type, transaction_time, description)
+        VALUES (?, ?, 'file_upload', NOW(), ?)
+    ");
+    $stmt->execute([
+        $_SESSION['user_id'],
+        $fileId,
+        'Uploaded ' . $fileDetails['name']
+    ]);
+
+    // Insert into text_repository (assuming text extraction is handled externally)
+    // For demonstration, insert a placeholder if the file type supports text extraction
+    if (in_array($fileDetails['type'], ['pdf', 'docx', 'txt'])) {
+        $stmt = $pdo->prepare("
+            INSERT INTO text_repository (file_id, extracted_text)
+            VALUES (?, ?)
+        ");
+        $stmt->execute([$fileId, null]); // Placeholder: null until actual text extraction is implemented
+    }
 
     generateResponse(true, 'File uploaded successfully.', ['file_id' => $fileId], 200);
 } catch (Exception $e) {
     error_log('Upload error: ' . $e->getMessage());
-    generateResponse(false, 'Upload failed: ' . $e->getMessage(), [], 500);
+    generateResponse(false, 'Upload failed: ' . $e->getMessage(), [], $e->getCode() ?: 500);
 }

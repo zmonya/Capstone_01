@@ -2,11 +2,11 @@
 session_start();
 require 'db_connection.php';
 require 'log_activity.php';
-require 'vendor/autoload.php';
+require 'vendor/autoload.php'; // Load Composer autoloader for phpdotenv
 
 use Dotenv\Dotenv;
 
-// Load environment variables
+// Load environment variables (if needed)
 $dotenv = Dotenv::createImmutable(__DIR__);
 $dotenv->safeLoad();
 
@@ -15,7 +15,7 @@ header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
 header('X-XSS-Protection: 1; mode=block');
 
-// Disable error display in production
+// Disable error display in production; log instead
 ini_set('display_errors', 0);
 ini_set('display_startup_errors', 0);
 ini_set('error_log', __DIR__ . '/logs/error_log.log');
@@ -23,6 +23,9 @@ error_reporting(E_ALL);
 
 /**
  * Sends JSON response and exits.
+ *
+ * @param array $data
+ * @param int $statusCode
  */
 function sendResponse(array $data, int $statusCode = 200): void
 {
@@ -34,6 +37,10 @@ function sendResponse(array $data, int $statusCode = 200): void
 
 /**
  * Validate the user's session and CSRF token.
+ *
+ * @param PDO $pdo
+ * @return array ['user_id'=>int,'users_department_id'=>int]
+ * @throws Exception
  */
 function validateUserSession(PDO $pdo): array
 {
@@ -41,6 +48,7 @@ function validateUserSession(PDO $pdo): array
         throw new Exception('User not logged in.', 401);
     }
 
+    // CSRF protection using header only
     $csrfHeader = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? null;
     $expected = $_SESSION['csrf_token'] ?? null;
 
@@ -50,6 +58,7 @@ function validateUserSession(PDO $pdo): array
 
     $userId = (int)$_SESSION['user_id'];
 
+    // Fetch at least one users_department_id
     $stmt = $pdo->prepare("SELECT users_department_id FROM users_department WHERE user_id = ? LIMIT 1");
     $stmt->execute([$userId]);
     $usersDepartmentId = $stmt->fetchColumn();
@@ -63,8 +72,14 @@ function validateUserSession(PDO $pdo): array
 
 /**
  * Validates & sanitizes input parameters.
+ *
+ * @param string $interval
+ * @param string|null $startDate
+ * @param string|null $endDate
+ * @return array
+ * @throws Exception
  */
-function validateInput(string $interval, ?string $startDate, ?string $endDate, int $page, int $limit): array
+function validateInput(string $interval, ?string $startDate, ?string $endDate): array
 {
     $validIntervals = ['day', 'week', 'month', 'range'];
     if (!in_array($interval, $validIntervals, true)) {
@@ -85,22 +100,18 @@ function validateInput(string $interval, ?string $startDate, ?string $endDate, i
         }
     }
 
-    $page = max(1, $page);
-    $limit = max(1, min(100, $limit));
-    $offset = ($page - 1) * $limit;
-
     return [
         'interval' => $interval,
         'startDate' => $startDate,
-        'endDate' => $endDate,
-        'page' => $page,
-        'limit' => $limit,
-        'offset' => $offset
+        'endDate' => $endDate
     ];
 }
-
 /**
  * Builds a placeholder map for an array of ids for safe binding in PDO.
+ *
+ * @param array $items
+ * @param string $prefix
+ * @return array [placeholdersString, assocParamsArray]
  */
 function buildNamedPlaceholders(array $items, string $prefix = 'p'): array
 {
@@ -121,8 +132,13 @@ function buildNamedPlaceholders(array $items, string $prefix = 'p'): array
 
 /**
  * Generates mock data for ADMIN user
+ *
+ * @param string $interval
+ * @param string|null $startDate
+ * @param string|null $endDate
+ * @return array
  */
-function generateMockData(string $interval, ?string $startDate, ?string $endDate, int $page, int $limit): array
+function generateMockData(string $interval, ?string $startDate, ?string $endDate): array
 {
     $labels = [];
     $filesSent = [];
@@ -131,7 +147,8 @@ function generateMockData(string $interval, ?string $startDate, ?string $endDate
     $filesReceivedFromRequest = [];
     $tableData = [];
 
-    $now = new DateTime('2025-08-12');
+    // Define date ranges based on interval
+    $now = new DateTime('2025-08-13'); // Updated to match current date
     if ($interval === 'day') {
         for ($i = 0; $i < 24; $i++) {
             $labels[] = sprintf("%02d:00", $i);
@@ -172,6 +189,7 @@ function generateMockData(string $interval, ?string $startDate, ?string $endDate
         }
     }
 
+    // Mock table data (aligned with new database schema)
     $documentTypes = [
         1 => 'Memorandum',
         2 => 'Letter',
@@ -187,20 +205,16 @@ function generateMockData(string $interval, ?string $startDate, ?string $endDate
         29 => 'Management Information Systems',
         30 => 'Office of the President'
     ];
-    $directions = ['Sent', 'Received', 'Requested', 'Request Approved', 'Request Denied'];
+    $directions = ['Sent', 'Received']; // Simplified to match new schema
     $start = $interval === 'range' ? new DateTime($startDate) : (clone $now)->modify('-30 days');
     $end = $interval === 'range' ? new DateTime($endDate) : $now;
 
-    $totalRows = 50; // Mock total rows
-    $offset = ($page - 1) * $limit;
-    $maxRows = min($limit, $totalRows - $offset);
-
-    for ($i = $offset; $i < $offset + $maxRows; $i++) {
+    for ($i = 0; $i < 10; $i++) {
         $date = (clone $start)->modify('+' . rand(0, (int)$start->diff($end)->days) . ' days');
         $tableData[] = [
-            'file_id' => rand(1, 26),
+            'file_id' => rand(14, 34), // Valid file_id range from schema
             'file_name' => "Document_" . rand(1000, 9999) . ".pdf",
-            'document_type' => $documentTypes[array_rand($documentTypes)],
+            'document_type' => $documentTypes[rand(1, 6)],
             'upload_date' => $date->format('Y-m-d H:i:s'),
             'department_name' => $departments[array_rand($departments)],
             'uploader' => 'ADMIN',
@@ -213,14 +227,14 @@ function generateMockData(string $interval, ?string $startDate, ?string $endDate
         'datasets' => [
             'files_sent' => $filesSent,
             'files_received' => $filesReceived,
-            'files_requested' => $filesRequested,
-            'files_received_from_request' => $filesReceivedFromRequest
+            'files_requested' => $filesRequested, // Kept for compatibility, but could be removed
+            'files_received_from_request' => $filesReceivedFromRequest // Kept for compatibility
         ],
-        'tableData' => $tableData,
-        'totalRows' => $totalRows
+        'tableData' => $tableData
     ];
 }
 
+// Main logic (replacing the try-catch block after session validation)
 try {
     if (!isset($pdo) || !$pdo instanceof PDO) {
         throw new Exception('Database connection not available.', 500);
@@ -234,22 +248,18 @@ try {
     $interval = filter_input(INPUT_GET, 'interval', FILTER_SANITIZE_STRING) ?: 'day';
     $startDate = filter_input(INPUT_GET, 'startDate', FILTER_SANITIZE_STRING) ?: null;
     $endDate = filter_input(INPUT_GET, 'endDate', FILTER_SANITIZE_STRING) ?: null;
-    $page = filter_input(INPUT_GET, 'page', FILTER_VALIDATE_INT, ['options' => ['default' => 1, 'min_range' => 1]]) ?: 1;
-    $limit = filter_input(INPUT_GET, 'limit', FILTER_VALIDATE_INT, ['options' => ['default' => 10, 'min_range' => 1, 'max_range' => 100]]) ?: 10;
 
-    $validated = validateInput($interval, $startDate, $endDate, $page, $limit);
+    $validated = validateInput($interval, $startDate, $endDate);
 
-    // For ADMIN (user_id=14), return mock data
+    // For ADMIN (user_id=14), return mock data for demonstration
     if ($userId === 14) {
-        $mockData = generateMockData($validated['interval'], $validated['startDate'], $validated['endDate'], $validated['page'], $validated['limit']);
+        $mockData = generateMockData($validated['interval'], $validated['startDate'], $validated['endDate']);
         error_log(sprintf(
-            "[%s] User %d fetched mock incoming/outgoing report (interval=%s%s, page=%d, limit=%d)",
+            "[%s] User %d fetched mock incoming/outgoing report (interval=%s%s)",
             date('Y-m-d H:i:s'),
             $userId,
             $validated['interval'],
-            ($validated['interval'] === 'range' ? " {$validated['startDate']} to {$validated['endDate']}" : ''),
-            $validated['page'],
-            $validated['limit']
+            ($validated['interval'] === 'range' ? " {$validated['startDate']} to {$validated['endDate']}" : '')
         ));
         sendResponse($mockData, 200);
     }
@@ -273,12 +283,12 @@ try {
     $chartQuery = "
         SELECT 
             {$groupBy} AS period,
-            SUM(CASE WHEN t.transaction_type = 'send' AND t.user_id = :userId THEN 1 ELSE 0 END) AS files_sent,
-            SUM(CASE WHEN t.transaction_type = 'send' AND t.transaction_status = 'completed' AND (t.user_id = :userId OR t.users_department_id IN ({$udPlaceholders})) THEN 1 ELSE 0 END) AS files_received,
-            SUM(CASE WHEN t.transaction_type = 'request' AND t.user_id = :userId THEN 1 ELSE 0 END) AS files_requested,
-            SUM(CASE WHEN t.transaction_type = 'request' AND t.transaction_status = 'completed' AND t.user_id = :userId THEN 1 ELSE 0 END) AS files_received_from_request
+            SUM(CASE WHEN t.transaction_type = 'upload' AND t.user_id = :userId THEN 1 ELSE 0 END) AS files_sent,
+            SUM(CASE WHEN t.transaction_type = 'upload' AND t.transaction_status = 'completed' AND t.users_department_id IN ({$udPlaceholders}) THEN 1 ELSE 0 END) AS files_received,
+            SUM(CASE WHEN t.transaction_type = 'upload' AND t.user_id = :userId THEN 1 ELSE 0 END) AS files_requested,
+            SUM(CASE WHEN t.transaction_type = 'upload' AND t.transaction_status = 'completed' AND t.user_id = :userId THEN 1 ELSE 0 END) AS files_received_from_request
         FROM transactions t
-        WHERE t.transaction_type IN ('send', 'request')
+        WHERE t.transaction_type = 'upload'
           AND (t.user_id = :userId OR t.users_department_id IN ({$udPlaceholders}))
     ";
 
@@ -296,38 +306,20 @@ try {
     $stmt->execute($chartParams);
     $chartResults = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // Table Query with Pagination
+    // Table Query
     [$udPlaceholders2, $udParams2] = buildNamedPlaceholders($usersDepartmentIds, 'ud2');
-
-    $countQuery = "
-        SELECT COUNT(DISTINCT f.file_id) AS total_rows
-        FROM files f
-        LEFT JOIN transactions t ON f.file_id = t.file_id
-        WHERE t.transaction_type IN ('send','request')
-          AND (f.file_status IS NULL OR f.file_status != 'disposed')
-          AND (t.user_id = :userId OR t.users_department_id IN ({$udPlaceholders2}))
-    ";
 
     $tableQuery = "
         SELECT DISTINCT
             f.file_id AS file_id,
             COALESCE(f.file_name, 'Unnamed File') AS file_name,
             COALESCE(dt.type_name, 'Unknown Type') AS document_type,
-            CASE 
-                WHEN t.transaction_type = 'send' AND t.user_id = :userId THEN t.transaction_time
-                WHEN t.transaction_type = 'send' AND t.transaction_status = 'completed' AND (t.user_id = :userId OR t.users_department_id IN ({$udPlaceholders2})) THEN t.transaction_time
-                WHEN t.transaction_type = 'request' AND t.user_id = :userId THEN t.transaction_time
-                ELSE NULL
-            END AS event_date,
+            t.transaction_time AS event_date,
             COALESCE(d.department_name, 'No Department') AS department_name,
             COALESCE(u.username, 'Unknown User') AS uploader,
             CASE 
-                WHEN t.transaction_type = 'send' AND t.user_id = :userId THEN 'Sent'
-                WHEN t.transaction_type = 'send' AND t.transaction_status = 'completed' AND t.user_id = :userId THEN 'Received'
-                WHEN t.transaction_type = 'send' AND t.transaction_status = 'completed' AND t.users_department_id IN ({$udPlaceholders2}) THEN 'Received (Department)'
-                WHEN t.transaction_type = 'request' AND t.user_id = :userId AND t.transaction_status = 'pending' THEN 'Requested'
-                WHEN t.transaction_type = 'request' AND t.user_id = :userId AND t.transaction_status = 'completed' THEN 'Request Approved'
-                WHEN t.transaction_type = 'request' AND t.user_id = :userId AND t.transaction_status = 'rejected' THEN 'Request Denied'
+                WHEN t.transaction_type = 'upload' AND t.user_id = :userId THEN 'Sent'
+                WHEN t.transaction_type = 'upload' AND t.transaction_status = 'completed' AND t.users_department_id IN ({$udPlaceholders2}) THEN 'Received'
                 ELSE 'Unknown'
             END AS direction
         FROM files f
@@ -336,7 +328,7 @@ try {
         LEFT JOIN users_department ud ON t.users_department_id = ud.users_department_id
         LEFT JOIN departments d ON ud.department_id = d.department_id
         LEFT JOIN users u ON f.user_id = u.user_id
-        WHERE t.transaction_type IN ('send','request')
+        WHERE t.transaction_type = 'upload'
           AND (f.file_status IS NULL OR f.file_status != 'disposed')
           AND (t.user_id = :userId OR t.users_department_id IN ({$udPlaceholders2}))
     ";
@@ -344,37 +336,24 @@ try {
     $tableParams = array_merge([':userId' => $userId], $udParams2);
 
     if ($validated['interval'] === 'range') {
-        $countQuery .= " AND t.transaction_time BETWEEN :startDate AND :endDate";
         $tableQuery .= " AND t.transaction_time BETWEEN :startDate AND :endDate";
         $tableParams[':startDate'] = $validated['startDate'] . ' 00:00:00';
         $tableParams[':endDate'] = $validated['endDate'] . ' 23:59:59';
     }
 
-    // Get total rows
-    $stmt = $pdo->prepare($countQuery);
-    $stmt->execute($tableParams);
-    $totalRows = (int)$stmt->fetchColumn();
-
-    // Apply pagination
-    $tableQuery .= " ORDER BY event_date ASC LIMIT :limit OFFSET :offset";
-    $tableParams[':limit'] = $validated['limit'];
-    $tableParams[':offset'] = $validated['offset'];
+    $tableQuery .= " ORDER BY event_date ASC";
 
     $stmt = $pdo->prepare($tableQuery);
-    $stmt->bindValue(':limit', $validated['limit'], PDO::PARAM_INT);
-    $stmt->bindValue(':offset', $validated['offset'], PDO::PARAM_INT);
     $stmt->execute($tableParams);
     $filesResults = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // Log access
+    // Log access without file_id
     error_log(sprintf(
-        "[%s] User %d fetched incoming/outgoing report (interval=%s%s, page=%d, limit=%d)",
+        "[%s] User %d fetched incoming/outgoing report (interval=%s%s)",
         date('Y-m-d H:i:s'),
         $userId,
         $validated['interval'],
-        ($validated['interval'] === 'range' ? " {$validated['startDate']} to {$validated['endDate']}" : ''),
-        $validated['page'],
-        $validated['limit']
+        ($validated['interval'] === 'range' ? " {$validated['startDate']} to {$validated['endDate']}" : '')
     ));
 
     // Prepare chart data response
@@ -396,11 +375,9 @@ try {
     sendResponse([
         'labels' => $labels,
         'datasets' => $datasets,
-        'tableData' => $tableData,
-        'totalRows' => $totalRows
+        'tableData' => $tableData
     ], 200);
 } catch (Exception $e) {
     error_log("Error in fetch_incoming_outgoing.php: " . $e->getMessage());
     sendResponse(['error' => 'Server error: ' . $e->getMessage()], $e->getCode() && $e->getCode() >= 400 ? $e->getCode() : 500);
 }
-?>

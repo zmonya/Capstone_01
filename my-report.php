@@ -96,7 +96,7 @@ function fetchUserDetails(PDO $pdo, int $userId): array
 }
 
 /**
- * Fetch document copy details (documents that the user is involved with via send/accept)
+ * Fetch document copy details (documents that the user is involved with via upload)
  *
  * @param PDO $pdo
  * @param int $userId
@@ -105,14 +105,14 @@ function fetchUserDetails(PDO $pdo, int $userId): array
 function fetchDocumentCopyDetails(PDO $pdo, int $userId): array
 {
     $stmt = $pdo->prepare("
-        SELECT f.file_id, f.file_name, f.copy_type, f.physical_storage,
+        SELECT f.file_id, f.file_name, f.copy_type, f.physical_storage_path AS physical_storage,
                GROUP_CONCAT(DISTINCT d.department_name SEPARATOR ', ') AS departments_with_copy
         FROM files f
         LEFT JOIN transactions t ON f.file_id = t.file_id
         LEFT JOIN users_department ud ON t.users_department_id = ud.users_department_id
         LEFT JOIN departments d ON ud.department_id = d.department_id
-        WHERE t.user_id = ? AND t.transaction_type IN ('send', 'accept')
-        GROUP BY f.file_id, f.file_name, f.copy_type, f.physical_storage
+        WHERE t.user_id = ? AND t.transaction_type = 'upload'
+        GROUP BY f.file_id, f.file_name, f.copy_type, f.physical_storage_path
         ORDER BY f.file_name
     ");
     $stmt->execute([$userId]);
@@ -171,7 +171,7 @@ try {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style/client-sidebar.css">
-    <link rel="stylesheet" href="style/folder-page.css">
+    <link rel="stylesheet" href="style/my-report.css">
     <script src="https://code.jquery.com/jquery-3.7.1.min.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
@@ -227,9 +227,6 @@ try {
                 <option value="all">All</option>
                 <option value="Sent">Sent</option>
                 <option value="Received">Received</option>
-                <option value="Requested">Requested</option>
-                <option value="Request Approved">Request Approved</option>
-                <option value="Request Denied">Request Denied</option>
             </select>
         </div>
 
@@ -263,7 +260,7 @@ try {
                     <tr>
                         <th>File Name</th>
                         <th>Copy Type</th>
-                        <th>Physical Storage</th>
+                        <th>Physical Storage Path</th>
                         <th>Departments with Copy</th>
                     </tr>
                 </thead>
@@ -378,21 +375,8 @@ try {
                                 borderColor: '#2c3e50',
                                 backgroundColor: 'rgba(44, 62, 80, 0.2)',
                                 fill: true
-                            },
-                            {
-                                label: 'Files Requested',
-                                data: data.datasets.files_requested || [0],
-                                borderColor: '#e74c3c',
-                                backgroundColor: 'rgba(231, 76, 60, 0.2)',
-                                fill: true
-                            },
-                            {
-                                label: 'Files Received from Request',
-                                data: data.datasets.files_received_from_request || [0],
-                                borderColor: '#f1c40f',
-                                backgroundColor: 'rgba(241, 196, 15, 0.2)',
-                                fill: true
                             }
+                            // Removed 'Files Requested' and 'Files Received from Request' datasets
                         ]
                     },
                     options: {
@@ -415,48 +399,6 @@ try {
                 console.error('Fetch error:', err);
                 showAlert('Failed to load report data: ' + err.message, 'error');
             }).finally(() => setLoadingState(false));
-        };
-
-        const updateTable = () => {
-            elements.fileTableBody.innerHTML = '';
-            if (!Array.isArray(state.tableData) || state.tableData.length === 0) {
-                elements.fileTableBody.innerHTML = '<tr><td colspan="6">No file activity data available.</td></tr>';
-                return;
-            }
-            state.tableData.forEach(file => {
-                const tr = document.createElement('tr');
-                tr.dataset.direction = file.direction || '';
-                tr.dataset.date = file.upload_date || '';
-                tr.innerHTML = `
-                <td>${escapeHtml(file.file_name || 'N/A')}</td>
-                <td>${escapeHtml(file.document_type || 'N/A')}</td>
-                <td data-date="${escapeHtml(file.upload_date || '')}">${formatDate(file.upload_date)}</td>
-                <td>${escapeHtml(file.department_name || 'N/A')}</td>
-                <td>${escapeHtml(file.uploader || 'N/A')}</td>
-                <td>${escapeHtml(file.direction || 'N/A')}</td>
-            `;
-                elements.fileTableBody.appendChild(tr);
-            });
-            sortTable();
-            filterTable();
-        };
-
-        const escapeHtml = (str) => {
-            const d = document.createElement('div');
-            d.textContent = String(str || '');
-            return d.innerHTML;
-        };
-
-        const sortTable = () => {
-            const sortBy = document.getElementById('sortBy')?.value || 'newest';
-            const rows = Array.from(elements.fileTableBody.querySelectorAll('tr'));
-            rows.sort((a, b) => {
-                const da = new Date(a.dataset.date || '1970-01-01');
-                const db = new Date(b.dataset.date || '1970-01-01');
-                return sortBy === 'oldest' ? da - db : db - da;
-            });
-            elements.fileTableBody.innerHTML = '';
-            rows.forEach(r => elements.fileTableBody.appendChild(r));
         };
 
         const filterTable = () => {

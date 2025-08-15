@@ -2,29 +2,31 @@
 require 'db_connection.php';
 
 /**
- * Maps action types to integer values for transaction table.
+ * Maps action types to string values for transactions table.
  *
  * @param string $action
- * @return int
+ * @return string
  */
-function getTransactionType(string $action): int
+function getTransactionType(string $action): string
 {
     $types = [
-        'upload' => 1,
-        'send' => 2,
-        'notification' => 3,
-        'request' => 10,
-        'approve' => 11,
-        'edit' => 13,
-        'delete' => 14,
-        'add' => 15,
-        'other' => 4 // Default for non-user-initiated actions
+        'upload' => 'file_upload',
+        'send' => 'file_sent',
+        'notification' => 'notification',
+        'request' => 'file_request',
+        'approve' => 'file_approve',
+        'edit' => 'file_edit',
+        'delete' => 'file_delete',
+        'add' => 'add',
+        'other' => 'other',
+        'fetch_status' => 'fetch_status',
+        'co-ownership' => 'co-ownership'
     ];
-    return $types[strtolower($action)] ?? 4;
+    return $types[strtolower($action)] ?? 'other';
 }
 
 /**
- * Logs an activity in the transaction table.
+ * Logs an activity in the transactions table.
  *
  * @param int $userId The ID of the user performing the action.
  * @param string $action The action being logged (e.g., "Uploaded file: filename").
@@ -42,8 +44,8 @@ function logActivity(int $userId, string $action, ?int $fileId = null, ?int $dep
     $type = $transactionType ? getTransactionType($transactionType) : getTransactionType($action);
 
     $stmt = $pdo->prepare("
-        INSERT INTO transaction (User_id, Users_Department_id, File_id, Transaction_status, Transaction_type, Time, Massage)
-        VALUES (?, ?, ?, 'completed', ?, NOW(), ?)
+        INSERT INTO transactions (user_id, users_department_id, file_id, transaction_type, transaction_time, description)
+        VALUES (?, ?, ?, ?, NOW(), ?)
     ");
     $stmt->execute([$userId, $usersDepartmentId, $fileId, $type, $action]);
 }
@@ -62,22 +64,22 @@ function logFileActivity(int $userId, string $fileName, int $fileId, array $depa
     global $pdo;
 
     // Get user's department affiliation
-    $stmt = $pdo->prepare("SELECT Users_Department_id FROM users_department WHERE User_id = ? LIMIT 1");
+    $stmt = $pdo->prepare("SELECT users_department_id FROM users_department WHERE user_id = ? LIMIT 1");
     $stmt->execute([$userId]);
     $usersDepartmentId = $stmt->fetchColumn() ?: null;
 
     if (empty($departmentIds)) {
-        logActivity($userId, "Uploaded file: $fileName", $fileId, null, $usersDepartmentId, 'upload');
+        logActivity($userId, "Uploaded file: $fileName", $fileId, null, $usersDepartmentId, 'file_upload');
     } else {
         $placeholders = implode(',', array_fill(0, count($departmentIds), '?'));
-        $stmt = $pdo->prepare("SELECT Department_id, Department_name FROM departments WHERE Department_id IN ($placeholders)");
+        $stmt = $pdo->prepare("SELECT department_id, department_name FROM departments WHERE department_id IN ($placeholders)");
         $stmt->execute($departmentIds);
         $departments = $stmt->fetchAll();
 
-        $departmentMap = array_column($departments, 'Department_name', 'Department_id');
+        $departmentMap = array_column($departments, 'department_name', 'department_id');
         foreach ($departmentIds as $departmentId) {
             $departmentName = $departmentMap[$departmentId] ?? 'Unknown Department';
-            logActivity($userId, "Sent file: $fileName to department: $departmentName", $fileId, $departmentId, $usersDepartmentId, 'send');
+            logActivity($userId, "Sent file: $fileName to department: $departmentName", $fileId, $departmentId, $usersDepartmentId, 'file_sent');
         }
     }
 }

@@ -2,487 +2,338 @@
 session_start();
 require 'db_connection.php';
 
-// Security headers
-header('X-Content-Type-Options: nosniff');
-header('X-Frame-Options: DENY');
-header('X-XSS-Protection: 1; mode=block');
-
-// CSRF token generation and validation
-function generateCsrfToken() {
-    if (empty($_SESSION['csrf_token'])) {
-        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
-    }
-    return $_SESSION['csrf_token'];
-}
-
-function validateCsrfToken($token) {
-    return isset($_SESSION['csrf_token']) && hash_equals($_SESSION['csrf_token'], $token);
-}
-
-// Redirect to login if not authenticated or not an admin
-if (!isset($_SESSION['user_id']) || !isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
+if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
     header('Location: login.php');
     exit();
 }
 
-$userId = filter_var($_SESSION['user_id'], FILTER_VALIDATE_INT);
-if ($userId === false) {
-    session_destroy();
-    header('Location: login.php');
-    exit();
-}
+$error = $success = "";
 
-// Function to execute prepared queries safely
-function executeQuery($pdo, $query, $params = []) {
-    try {
-        $stmt = $pdo->prepare($query);
-        $stmt->execute($params);
-        return $stmt;
-    } catch (PDOException $e) {
-        error_log("Database error: " . $e->getMessage());
-        return false;
-    }
-}
+/**
+ * Fetch storage locations with their cabinets and departments
+ *
+ * @param PDO $pdo
+ * @return array
+ */
+/**
+ * Fetch storage locations grouped by department with their cabinets
+ *
+ * @param PDO $pdo
+ * @return array
+ */
+function fetchStorageLocations(PDO $pdo): array
+{
+    $stmt = $pdo->prepare("
+        SELECT 
+            d.department_id, 
+            d.department_name,
+            f.storage_location, 
+            f.physical_storage_path, 
+            MIN(f.file_name) AS file_name
+        FROM files f
+        LEFT JOIN users_department ud ON f.user_id = ud.user_id
+        LEFT JOIN departments d ON ud.department_id = d.department_id
+        WHERE f.physical_storage_path IS NOT NULL
+        AND f.file_status = 'active'
+        GROUP BY d.department_id, d.department_name, f.storage_location, f.physical_storage_path
+        ORDER BY d.department_name, f.storage_location, f.physical_storage_path
+    ");
+    $stmt->execute();
+    $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Function to log transactions
-function logTransaction($pdo, $userId, $status, $type, $message) {
-    $stmt = executeQuery($pdo, "
-        INSERT INTO transaction (User_id, Transaction_status, Transaction_type, Time, Massage)
-        VALUES (?, ?, ?, NOW(), ?)", 
-        [$userId, $status, $type, $message]
-    );
-    return $stmt !== false;
-}
+    $departments = [];
+    foreach ($results as $row) {
+        $department_id = $row['department_id'] ?: 0; // Use 0 for null department_id
+        $department_name = $row['department_name'] ?: 'Unassigned Department';
+        $location = $row['storage_location'] ?: 'Unspecified Location';
+        $cabinet_id = explode('/', $row['physical_storage_path'])[0];
+        $cabinet_name = "Cabinet $cabinet_id";
 
-$error = "";
-$success = "";
-
-// Handle form submissions
-if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['action']) && validateCsrfToken($_POST['csrf_token'])) {
-    $action = filter_input(INPUT_POST, 'action', FILTER_SANITIZE_FULL_SPECIAL_CHARS);
-    
-    if ($action === 'add' || $action === 'edit') {
-        $file_id = isset($_POST['file_id']) ? filter_var($_POST['file_id'], FILTER_VALIDATE_INT) : null;
-        $department_id = filter_var($_POST['department_id'], FILTER_VALIDATE_INT);
-        $sub_department_id = filter_var($_POST['sub_department_id'], FILTER_VALIDATE_INT) ?: null;
-        $building = trim(filter_input(INPUT_POST, 'building', FILTER_SANITIZE_FULL_SPECIAL_CHARS));
-        $room = trim(filter_input(INPUT_POST, 'room', FILTER_SANITIZE_FULL_SPECIAL_CHARS));
-        $layer = filter_var($_POST['layer'], FILTER_VALIDATE_INT);
-        $box = filter_var($_POST['box'], FILTER_VALIDATE_INT);
-        $folder = filter_var($_POST['folder'], FILTER_VALIDATE_INT);
-        $folder_capacity = filter_var($_POST['folder_capacity'], FILTER_VALIDATE_INT);
-        $location = "$building, $room, Layer $layer-Box $box-Folder $folder";
-
-        if (empty($building) || empty($room) || !$department_id || !$layer || !$box || !$folder || !$folder_capacity) {
-            $error = "All required fields must be filled.";
-            logTransaction($pdo, $userId, 'Failure', 12, $error);
-        } else {
-            // Validate folder capacity
-            if ($folder_capacity <= 0) {
-                $error = "Folder capacity must be greater than 0.";
-                logTransaction($pdo, $userId, 'Failure', 12, $error);
-            } else {
-                // Check file count for the location
-                $locationKey = "$department_id-$sub_department_id-$location";
-                $countStmt = executeQuery($pdo, "
-                    SELECT COUNT(*) as file_count 
-                    FROM files 
-                    WHERE File_path = ? AND Copy_type = 'hard_copy'", 
-                    [$location]
-                );
-                $file_count = $countStmt ? $countStmt->fetch(PDO::FETCH_ASSOC)['file_count'] : 0;
-
-                if ($action === 'add' && $file_count >= $folder_capacity) {
-                    $error = "Folder capacity exceeded for this location.";
-                    logTransaction($pdo, $userId, 'Failure', 12, $error);
-                } else {
-                    if ($action === 'add') {
-                        // Check if file exists
-                        $fileStmt = executeQuery($pdo, "SELECT File_id FROM files WHERE File_id = ?", [$file_id]);
-                        if (!$fileStmt || $fileStmt->rowCount() === 0) {
-                            $error = "Invalid file ID.";
-                            logTransaction($pdo, $userId, 'Failure', 12, $error);
-                        } else {
-                            $stmt = executeQuery($pdo, "
-                                UPDATE files 
-                                SET Department_id = ?, File_path = ?, Copy_type = 'hard_copy', Folder_capacity = ? 
-                                WHERE File_id = ?", 
-                                [$department_id, $location, $folder_capacity, $file_id]
-                            );
-                            if ($stmt) {
-                                $success = "File assigned to storage location successfully.";
-                                logTransaction($pdo, $userId, 'Success', 12, $success);
-                                header("Location: physical_storage_management.php");
-                                exit();
-                            } else {
-                                $error = "Failed to assign file to storage location.";
-                                logTransaction($pdo, $userId, 'Failure', 12, $error);
-                            }
-                        }
-                    } elseif ($action === 'edit' && $file_id) {
-                        $stmt = executeQuery($pdo, "
-                            UPDATE files 
-                            SET Department_id = ?, File_path = ?, Folder_capacity = ? 
-                            WHERE File_id = ?", 
-                            [$department_id, $location, $folder_capacity, $file_id]
-                        );
-                        if ($stmt) {
-                            $success = "Storage assignment updated successfully.";
-                            logTransaction($pdo, $userId, 'Success', 13, $success);
-                            header("Location: physical_storage_management.php");
-                            exit();
-                        } else {
-                            $error = "Failed to update storage assignment.";
-                            logTransaction($pdo, $userId, 'Failure', 13, $error);
-                        }
-                    }
-                }
-            }
+        if (!isset($departments[$department_id])) {
+            $departments[$department_id] = [
+                'department_name' => $department_name,
+                'locations' => []
+            ];
         }
-    } elseif ($action === 'remove_file') {
-        $file_id = filter_var($_POST['file_id'], FILTER_VALIDATE_INT);
-        if ($file_id) {
-            $stmt = executeQuery($pdo, "
-                UPDATE files 
-                SET File_path = NULL, Copy_type = NULL, Folder_capacity = NULL 
-                WHERE File_id = ?", 
-                [$file_id]
-            );
-            if ($stmt) {
-                $success = "File removed from storage successfully.";
-                logTransaction($pdo, $userId, 'Success', 14, $success);
-                header("Location: physical_storage_management.php");
-                exit();
-            } else {
-                $error = "Failed to remove file from storage.";
-                logTransaction($pdo, $userId, 'Failure', 14, $error);
-            }
-        } else {
-            $error = "Invalid file ID.";
-            logTransaction($pdo, $userId, 'Failure', 14, $error);
+        if (!isset($departments[$department_id]['locations'][$location])) {
+            $departments[$department_id]['locations'][$location] = [
+                'cabinets' => []
+            ];
         }
-    }
-}
-
-// Handle deletion of storage assignment
-if (isset($_GET['delete']) && validateCsrfToken($_GET['csrf_token'])) {
-    $file_id = filter_var($_GET['delete'], FILTER_VALIDATE_INT);
-    if ($file_id) {
-        $stmt = executeQuery($pdo, "
-            UPDATE files 
-            SET File_path = NULL, Copy_type = NULL, Folder_capacity = NULL 
-            WHERE File_id = ?", 
-            [$file_id]
-        );
-        if ($stmt) {
-            $success = "Storage assignment deleted successfully.";
-            logTransaction($pdo, $userId, 'Success', 15, $success);
-            header("Location: physical_storage_management.php");
-            exit();
-        } else {
-            $error = "Failed to delete storage assignment.";
-            logTransaction($pdo, $userId, 'Failure', 15, $error);
-        }
-    } else {
-        $error = "Invalid file ID.";
-        logTransaction($pdo, $userId, 'Failure', 15, $error);
-    }
-}
-
-// Fetch all departments
-$departmentsStmt = executeQuery($pdo, "
-    SELECT Department_id, Department_name, Department_type 
-    FROM departments 
-    WHERE Department_type IN ('college', 'office') 
-    ORDER BY Department_name ASC");
-$departments = $departmentsStmt ? $departmentsStmt->fetchAll(PDO::FETCH_ASSOC) : [];
-
-// Fetch all subdepartments
-$subdepartmentsStmt = executeQuery($pdo, "
-    SELECT Department_id, Department_name 
-    FROM departments 
-    WHERE Department_type = 'sub_department' 
-    ORDER BY Department_name ASC");
-$subdepartments = $subdepartmentsStmt ? $subdepartmentsStmt->fetchAll(PDO::FETCH_ASSOC) : [];
-
-// Fetch all physical files
-$filesStmt = executeQuery($pdo, "
-    SELECT f.File_id, f.File_name, f.File_path, f.Department_id, f.Copy_type, f.Folder_capacity, 
-           d.Department_name, u.Username, dt.Field_label AS Document_type
-    FROM files f
-    LEFT JOIN departments d ON f.Department_id = d.Department_id
-    LEFT JOIN users u ON f.User_id = u.User_id
-    LEFT JOIN documents_type_fields dt ON f.Document_type_id = dt.Document_type_id
-    WHERE f.Copy_type = 'hard_copy'
-    ORDER BY d.Department_name, f.File_name ASC");
-$files = $filesStmt ? $filesStmt->fetchAll(PDO::FETCH_ASSOC) : [];
-
-// Organize files by department
-$departments_with_files = [];
-foreach ($files as $file) {
-    $dept_id = $file['Department_id'];
-    if (!isset($departments_with_files[$dept_id])) {
-        $departments_with_files[$dept_id] = [
-            'name' => $file['Department_name'] ?? 'Unknown',
-            'files' => []
+        $departments[$department_id]['locations'][$location]['cabinets'][] = [
+            'physical_storage_path' => $row['physical_storage_path'],
+            'cabinet_name' => $cabinet_name,
+            'department_id' => $row['department_id'],
+            'department_name' => $row['department_name']
         ];
     }
-    $departments_with_files[$dept_id]['files'][] = $file;
+    return $departments;
 }
-usort($departments_with_files, fn($a, $b) => strcmp($a['name'], $b['name']));
-?>
 
+/**
+ * Fetch storage details for a physical storage path
+ *
+ * @param PDO $pdo
+ * @param string $physical_storage_path
+ * @return array
+ */
+function fetchStorageDetails(PDO $pdo, string $physical_storage_path): array
+{
+    $stmt = $pdo->prepare("
+        SELECT f.file_id, f.file_name, f.physical_storage_path, f.storage_capacity, u.username AS uploader, dt.type_name AS document_category
+        FROM files f
+        LEFT JOIN users u ON f.user_id = u.user_id
+        LEFT JOIN document_types dt ON f.document_type_id = dt.document_type_id
+        WHERE f.physical_storage_path = ? AND f.file_status = 'active'
+        AND f.file_name NOT LIKE 'Placeholder%'
+    ");
+    $stmt->execute([$physical_storage_path]);
+    $files = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $structure = [];
+    $default_capacity = 10; // Default if storage_capacity is NULL
+    foreach ($files as $file) {
+        $path_parts = explode('/', $file['physical_storage_path']);
+        if (count($path_parts) !== 4) continue;
+        $layer = $path_parts[1];
+        $box = $path_parts[2];
+        $folder = $path_parts[3];
+
+        if (!isset($structure[$layer])) {
+            $structure[$layer] = [];
+        }
+        if (!isset($structure[$layer][$box])) {
+            $structure[$layer][$box] = [];
+        }
+        if (!isset($structure[$layer][$box][$folder])) {
+            $structure[$layer][$box][$folder] = [
+                'id' => $file['physical_storage_path'],
+                'file_count' => 0,
+                'files' => [],
+                'capacity' => $file['storage_capacity'] ?? $default_capacity
+            ];
+        }
+        $structure[$layer][$box][$folder]['files'][] = $file;
+        $structure[$layer][$box][$folder]['file_count']++;
+    }
+
+    return $structure;
+}
+
+if ($_SERVER["REQUEST_METHOD"] === "POST") {
+    if (isset($_POST['action'])) {
+        $action = $_POST['action'];
+        $physical_storage_path = trim(filter_input(INPUT_POST, 'physical_storage_path', FILTER_SANITIZE_FULL_SPECIAL_CHARS));
+        $cabinet_name = trim(filter_input(INPUT_POST, 'cabinet_name', FILTER_SANITIZE_FULL_SPECIAL_CHARS));
+        $department_id = filter_input(INPUT_POST, 'department_id', FILTER_VALIDATE_INT);
+        $sub_department_id = filter_input(INPUT_POST, 'sub_department_id', FILTER_VALIDATE_INT) ?: null;
+        $storage_location = trim(filter_input(INPUT_POST, 'storage_location', FILTER_SANITIZE_FULL_SPECIAL_CHARS));
+        $storage_capacity = filter_input(INPUT_POST, 'storage_capacity', FILTER_VALIDATE_INT) ?: 10;
+
+        if (empty($cabinet_name) || !$department_id || empty($physical_storage_path) || empty($storage_location) || !$storage_capacity) {
+            $error = "All required fields must be filled.";
+        } elseif (!preg_match('/^[A-Z][0-9]+(\/[A-Z][0-9]+){3}$/', $physical_storage_path)) {
+            $error = "Invalid physical storage path format. Use format like C1/L1/B1/F1.";
+        } else {
+            try {
+                global $pdo;
+                $pdo->beginTransaction();
+
+                if ($action === 'add') {
+                    $stmt = $pdo->prepare("SELECT COUNT(*) FROM files WHERE physical_storage_path = ?");
+                    $stmt->execute([$physical_storage_path]);
+                    if ($stmt->fetchColumn() > 0) {
+                        $error = "Physical storage path already exists.";
+                    } else {
+                        $stmt = $pdo->prepare("
+            INSERT INTO files (file_name, user_id, file_size, file_type, file_status, physical_storage_path, storage_location, storage_capacity, file_path)
+            VALUES (?, ?, 0, 'pdf', 'active', ?, ?, ?, ?)
+        ");
+                        $sanitized_file_path = preg_replace('/[^A-Za-z0-9\/._-]/', '_', "uploads/placeholder_$physical_storage_path.pdf");
+                        $stmt->execute([
+                            "Placeholder for $physical_storage_path",
+                            $_SESSION['user_id'],
+                            $physical_storage_path,
+                            $storage_location,
+                            $storage_capacity,
+                            $sanitized_file_path
+                        ]);
+                        $fileId = $pdo->lastInsertId();
+
+                        $stmt = $pdo->prepare("
+            INSERT INTO users_department (user_id, department_id)
+            SELECT ?, ? WHERE NOT EXISTS (
+                SELECT 1 FROM users_department WHERE user_id = ? AND department_id = ?
+            )
+        ");
+                        $stmt->execute([$_SESSION['user_id'], $department_id, $_SESSION['user_id'], $department_id]);
+
+                        $stmt = $pdo->prepare("
+            INSERT INTO transactions (user_id, file_id, transaction_type, transaction_time, description)
+            VALUES (?, ?, 'storage_management', NOW(), ?)
+        ");
+                        $stmt->execute([
+                            $_SESSION['user_id'],
+                            $fileId,
+                            "Added storage location $physical_storage_path"
+                        ]);
+
+                        $success = "Storage location added successfully.";
+                    }
+                } elseif ($action === 'edit' && $physical_storage_path) {
+                    $stmt = $pdo->prepare("
+        UPDATE files 
+        SET storage_location = ?, storage_capacity = ?
+        WHERE physical_storage_path = ?
+    ");
+                    $stmt->execute([$storage_location, $storage_capacity, $physical_storage_path]);
+
+                    $stmt = $pdo->prepare("
+        INSERT INTO transactions (user_id, transaction_type, transaction_time, description)
+        VALUES (?, 'storage_management', NOW(), ?)
+    ");
+                    $stmt->execute([
+                        $_SESSION['user_id'],
+                        "Edited storage location $physical_storage_path"
+                    ]);
+
+                    $success = "Storage location updated successfully.";
+                }
+
+                $pdo->commit();
+                header('Content-Type: application/json');
+                echo json_encode(['success' => empty($error), 'message' => $error ?: $success]);
+                exit;
+            } catch (Exception $e) {
+                $pdo->rollBack();
+                error_log("Storage management error: " . $e->getMessage());
+                header('Content-Type: application/json');
+                echo json_encode(['success' => false, 'message' => "Error: " . $e->getMessage()]);
+                exit;
+            }
+        }
+        header('Content-Type: application/json');
+        echo json_encode(['success' => empty($error), 'message' => $error ?: $success]);
+        exit;
+    } elseif (isset($_POST['assign_file'])) {
+        $file_id = filter_input(INPUT_POST, 'file_id', FILTER_VALIDATE_INT);
+        $physical_storage_path = filter_input(INPUT_POST, 'physical_storage_path', FILTER_SANITIZE_FULL_SPECIAL_CHARS);
+
+        if (!$file_id || !$physical_storage_path) {
+            $error = "Invalid file ID or storage path.";
+        } else {
+            try {
+                $pdo->beginTransaction();
+
+                // Check capacity
+                $stmt = $pdo->prepare("
+                SELECT storage_capacity, (SELECT COUNT(*) FROM files WHERE physical_storage_path = ? AND file_status = 'active' AND file_name NOT LIKE 'Placeholder%') AS file_count
+                FROM files 
+                WHERE physical_storage_path = ? AND file_name LIKE 'Placeholder%' AND file_status = 'active'
+                LIMIT 1
+            ");
+                $stmt->execute([$physical_storage_path, $physical_storage_path]);
+                $result = $stmt->fetch(PDO::FETCH_ASSOC);
+                if ($result && $result['file_count'] >= ($result['storage_capacity'] ?? 10)) {
+                    $error = "Storage capacity exceeded.";
+                } else {
+                    $stmt = $pdo->prepare("
+                    UPDATE files 
+                    SET physical_storage_path = ? 
+                    WHERE file_id = ? AND file_status = 'active' AND physical_storage_path IS NULL
+                ");
+                    $stmt->execute([$physical_storage_path, $file_id]);
+
+                    $stmt = $pdo->prepare("
+                    INSERT INTO transactions (user_id, file_id, transaction_type, transaction_time, description)
+                    VALUES (?, ?, 'storage_management', NOW(), ?)
+                ");
+                    $stmt->execute([
+                        $_SESSION['user_id'],
+                        $file_id,
+                        "Assigned file ID $file_id to storage $physical_storage_path"
+                    ]);
+
+                    $success = "File assigned successfully.";
+                }
+
+                $pdo->commit();
+                header('Content-Type: application/json');
+                echo json_encode(['success' => empty($error), 'message' => $error ?: $success]);
+                exit;
+            } catch (Exception $e) {
+                $pdo->rollBack();
+                error_log("File assignment error: " . $e->getMessage());
+                header('Content-Type: application/json');
+                echo json_encode(['success' => false, 'message' => "Error: " . $e->getMessage()]);
+                exit;
+            }
+        }
+        header('Content-Type: application/json');
+        echo json_encode(['success' => empty($error), 'message' => $error ?: $success]);
+        exit;
+    } elseif (isset($_POST['remove_file']) && $_POST['remove_file'] == '1') {
+        $file_id = filter_input(INPUT_POST, 'file_id', FILTER_VALIDATE_INT);
+        $physical_storage_path = filter_input(INPUT_POST, 'physical_storage_path', FILTER_SANITIZE_FULL_SPECIAL_CHARS);
+
+        if (!$file_id || !$physical_storage_path) {
+            $error = "Invalid file ID or storage path.";
+        } else {
+            try {
+                $pdo->beginTransaction();
+
+                $stmt = $pdo->prepare("
+                UPDATE files 
+                SET physical_storage_path = NULL 
+                WHERE file_id = ? AND physical_storage_path = ? AND file_status = 'active'
+            ");
+                $stmt->execute([$file_id, $physical_storage_path]);
+
+                $stmt = $pdo->prepare("
+                INSERT INTO transactions (user_id, file_id, transaction_type, transaction_time, description)
+                VALUES (?, ?, 'storage_management', NOW(), ?)
+            ");
+                $stmt->execute([
+                    $_SESSION['user_id'],
+                    $file_id,
+                    "Removed file ID $file_id from storage $physical_storage_path"
+                ]);
+
+                $pdo->commit();
+                header('Content-Type: application/json');
+                echo json_encode(['success' => true, 'message' => 'File removed successfully']);
+                exit;
+            } catch (Exception $e) {
+                $pdo->rollBack();
+                error_log("File removal error: " . $e->getMessage());
+                header('Content-Type: application/json');
+                echo json_encode(['success' => false, 'message' => 'Error: ' . $e->getMessage()]);
+                exit;
+            }
+        }
+    }
+}
+
+// Fetch storage locations
+$storage_locations = fetchStorageLocations($pdo);
+$departments = $pdo->query("SELECT department_id, department_name FROM departments WHERE department_type IN ('college', 'office')")->fetchAll(PDO::FETCH_ASSOC);
+$sub_departments = $pdo->query("SELECT department_id, department_name, parent_department_id FROM departments WHERE department_type = 'sub_department'")->fetchAll(PDO::FETCH_ASSOC);
+$unassigned_files = $pdo->query("SELECT file_id, file_name FROM files WHERE file_status = 'active' AND physical_storage_path IS NULL")->fetchAll(PDO::FETCH_ASSOC);
+?>
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <title>Physical Storage Management - Arc-Hive</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" integrity="sha512-z3gLpd7yknf1YoNbCzqRKc4qyor8gaKU1qmn+CShxbuBusANI9QpRohGBreCFkKxLhei6S9CQXFEbbKuqLg0DA==" crossorigin="anonymous">
-    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/notyf@3/notyf.min.css">
-    <link rel="stylesheet" href="styles.css">
-    <link rel="stylesheet" href="admin-sidebar.css">
-    <link rel="stylesheet" href="admin-interface.css">
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js" integrity="sha256-/xUj+3OJU5yExlq6GSYGSHk7tPXikynS7ogEvDej/m4=" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/notyf@3/notyf.min.js"></script>
-    <style>
-        .main-content {
-            padding: 20px;
-            transition: margin-left 0.3s ease;
-        }
-        .error-message, .success-message {
-            padding: 10px;
-            margin-bottom: 15px;
-            border-radius: 4px;
-            font-size: 14px;
-        }
-        .error-message { background-color: #ffe6e6; color: #d32f2f; }
-        .success-message { background-color: #e6ffe6; color: #2e7d32; }
-        .file-search-form {
-            margin-top: 20px;
-            padding: 15px;
-            background: #f9f9f9;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        }
-        .file-search-form h3 {
-            margin: 0 0 15px;
-            font-size: 18px;
-            color: #333;
-        }
-        .search-filters {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            align-items: center;
-        }
-        .search-input, .search-select {
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 14px;
-            flex: 1;
-            min-width: 150px;
-        }
-        .search-btn {
-            padding: 8px 15px;
-            background: #007bff;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            transition: background 0.3s;
-        }
-        .search-btn:hover {
-            background: #0056b3;
-        }
-        .search-results {
-            margin-top: 20px;
-            max-height: 300px;
-            overflow-y: auto;
-        }
-        .results-table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-        .results-table th, .results-table td {
-            padding: 10px;
-            border: 1px solid #ddd;
-            text-align: left;
-        }
-        .results-table th {
-            background: #007bff;
-            color: white;
-        }
-        .results-table tr:nth-child(even) {
-            background: #f2f2f2;
-        }
-        .no-results {
-            color: #7f8c8d;
-            text-align: center;
-            padding: 10px;
-        }
-        .department-section {
-            margin-bottom: 20px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            background: #fff;
-        }
-        .dept-header {
-            background: #f5f5f5;
-            padding: 10px 15px;
-            cursor: pointer;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-radius: 5px 5px 0 0;
-        }
-        .dept-header h2 {
-            margin: 0;
-            font-size: 18px;
-            color: #333;
-        }
-        .file-table {
-            display: none;
-            margin: 10px;
-        }
-        .file-table table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 14px;
-        }
-        .file-table th, .file-table td {
-            padding: 12px;
-            border: 1px solid #ddd;
-            text-align: left;
-        }
-        .file-table th {
-            background-color: #f8f8f8;
-            font-weight: bold;
-        }
-        .action-buttons {
-            display: flex;
-            gap: 10px;
-        }
-        .edit-btn, .delete-btn, .remove-btn {
-            padding: 6px 12px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: background-color 0.2s;
-        }
-        .edit-btn {
-            background-color: #50c878;
-            color: white;
-        }
-        .edit-btn:hover {
-            background-color: #45a049;
-        }
-        .delete-btn, .remove-btn {
-            background-color: #d32f2f;
-            color: white;
-        }
-        .delete-btn:hover, .remove-btn:hover {
-            background-color: #b71c1c;
-        }
-        .modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.5);
-            justify-content: center;
-            align-items: center;
-            z-index: 1000;
-        }
-        .modal-content {
-            background: #fff;
-            padding: 20px;
-            border-radius: 8px;
-            max-width: 500px;
-            width: 90%;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-        }
-        .modal-content select, .modal-content input {
-            width: 100%;
-            padding: 10px;
-            margin-bottom: 15px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 14px;
-        }
-        .modal-content button {
-            width: 100%;
-            padding: 10px;
-            background-color: #50c878;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-        }
-        .modal-content button:hover {
-            background-color: #45a049;
-        }
-        .close {
-            float: right;
-            font-size: 24px;
-            cursor: pointer;
-            color: #333;
-        }
-        .open-modal-btn {
-            padding: 10px 20px;
-            margin-right: 10px;
-            margin-bottom: 15px;
-            background-color: #50c878;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: background-color 0.2s;
-        }
-        .open-modal-btn:hover {
-            background-color: #45a049;
-        }
-        .warning-modal-content {
-            text-align: center;
-        }
-        .warning-modal-content .buttons {
-            display: flex;
-            justify-content: center;
-            gap: 10px;
-            margin-top: 20px;
-        }
-        .confirm-btn, .cancel-btn {
-            padding: 8px 16px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        .confirm-btn {
-            background-color: #d32f2f;
-            color: white;
-        }
-        .confirm-btn:hover {
-            background-color: #b71c1c;
-        }
-        .cancel-btn {
-            background-color: #ccc;
-            color: #333;
-        }
-        .cancel-btn:hover {
-            background-color: #bbb;
-        }
-    </style>
+    <title>Physical Storage Management</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style/admin-sidebar.css">
+    <link rel="stylesheet" href="style/Physical_Storage_Management.css">
 </head>
+
 <body>
-    <!-- Admin Sidebar -->
     <div class="sidebar">
         <button class="toggle-btn" title="Toggle Sidebar"><i class="fas fa-bars"></i></button>
         <h2 class="sidebar-title">Admin Panel</h2>
@@ -492,378 +343,409 @@ usort($departments_with_files, fn($a, $b) => strcmp($a['name'], $b['name']));
         <a href="user_management.php"><i class="fas fa-users"></i><span class="link-text">User Management</span></a>
         <a href="department_management.php"><i class="fas fa-building"></i><span class="link-text">Department Management</span></a>
         <a href="physical_storage_management.php" class="active"><i class="fas fa-archive"></i><span class="link-text">Physical Storage</span></a>
-        <a href="document_type_management.php"><i class="fas fa-file-alt"></i><span class="link-text">Document Type Management</span></a>
         <a href="logout.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i><span class="link-text">Logout</span></a>
     </div>
 
-    <!-- Main Content -->
-    <div class="main-content sidebar-expanded">
-        <!-- CSRF Token -->
-        <input type="hidden" id="csrf_token" value="<?= htmlspecialchars(generateCsrfToken(), ENT_QUOTES, 'UTF-8') ?>">
+    <div class="modal-backdrop"></div>
+    <div class="main-content">
+        <div class="header-controls">
+            <button id="open-modal-btn" class="open-modal-btn">Add Storage Location</button>
+            <div class="legend">
+                <div class="occupied" data-tooltip="Storage is occupied"><span>Occupied</span></div>
+                <div class="available" data-tooltip="Storage is available"><span>Available</span></div>
+            </div>
+        </div>
 
-        <!-- Messages -->
-        <?php if (!empty($error)): ?>
-            <div class="error-message"><?= htmlspecialchars($error, ENT_QUOTES, 'UTF-8') ?></div>
-        <?php endif; ?>
-        <?php if (!empty($success)): ?>
-            <div class="success-message"><?= htmlspecialchars($success, ENT_QUOTES, 'UTF-8') ?></div>
-        <?php endif; ?>
-
-        <!-- Add Storage Assignment Button -->
-        <button id="open-modal-btn" class="open-modal-btn">Assign File to Storage</button>
-
-        <!-- Storage Assignment Modal -->
-        <div class="modal" id="storage-modal">
+        <div class="modal storage-form" id="storage-modal">
             <div class="modal-content">
-                <span class="close">×</span>
-                <h2><?= isset($_GET['edit']) ? 'Edit Storage Assignment' : 'Assign File to Storage' ?></h2>
-                <form method="POST" action="physical_storage_management.php">
+                <span class="close" onclick="closeModal('storage-modal')">&times;</span>
+                <h2><?= isset($_GET['edit']) ? 'Edit Storage Location' : 'Add Storage Location' ?></h2>
+                <form action="physical_storage_management.php" method="POST">
                     <input type="hidden" name="action" value="<?= isset($_GET['edit']) ? 'edit' : 'add' ?>">
-                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken(), ENT_QUOTES, 'UTF-8') ?>">
-                    <?php if (isset($_GET['edit'])): 
-                        $editFileId = filter_var($_GET['edit'], FILTER_VALIDATE_INT);
-                        $editStmt = executeQuery($pdo, "
-                            SELECT File_id, File_name, File_path, Department_id, Folder_capacity 
-                            FROM files 
-                            WHERE File_id = ? AND Copy_type = 'hard_copy'", [$editFileId]);
-                        $editFile = $editStmt ? $editStmt->fetch(PDO::FETCH_ASSOC) : null;
-                        $locationParts = $editFile ? explode(', ', $editFile['File_path'] . ', Layer 0-Box 0-Folder 0') : ['', '', 'Layer 0-Box 0-Folder 0'];
-                        $layerBoxFolder = explode('-', $locationParts[2] ?? 'Layer 0-Box 0-Folder 0');
-                    ?>
-                        <input type="hidden" name="file_id" value="<?= htmlspecialchars($editFileId, ENT_QUOTES, 'UTF-8') ?>">
-                        <input type="text" name="file_name" value="<?= htmlspecialchars($editFile['File_name'] ?? '', ENT_QUOTES, 'UTF-8') ?>" disabled>
-                    <?php else: ?>
-                        <select name="file_id" required>
-                            <option value="">Select File</option>
-                            <?php
-                            $fileListStmt = executeQuery($pdo, "
-                                SELECT File_id, File_name 
-                                FROM files 
-                                WHERE Copy_type IS NULL OR Copy_type != 'hard_copy'
-                                ORDER BY File_name ASC");
-                            $availableFiles = $fileListStmt ? $fileListStmt->fetchAll(PDO::FETCH_ASSOC) : [];
-                            foreach ($availableFiles as $file): ?>
-                                <option value="<?= htmlspecialchars($file['File_id'], ENT_QUOTES, 'UTF-8') ?>">
-                                    <?= htmlspecialchars($file['File_name'], ENT_QUOTES, 'UTF-8') ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
-                    <?php endif; ?>
-                    <select name="department_id" id="department_id" required onchange="loadSubDepartments()">
+                    <label for="physical_storage_path" data-error="" aria-describedby="physical_storage_path_help">Physical Storage Path (e.g., C1/L1/B1/F1):</label>
+                    <input type="text" id="physical_storage_path" name="physical_storage_path" value="<?= isset($_GET['edit']) ? htmlspecialchars($_GET['edit']) : '' ?>" <?= isset($_GET['edit']) ? 'readonly' : '' ?> required pattern="[A-Z][0-9]+(/[A-Z][0-9]+){3}">
+                    <span id="physical_storage_path_help" class="form-help">Enter in format C1/L1/B1/F1 (e.g., Cabinet 1, Layer 1, Box 1, Folder 1)</span>
+                    <label for="cabinet_name" data-error="">Cabinet Name (Display Only):</label>
+                    <input type="text" id="cabinet_name" name="cabinet_name" value="<?= isset($_GET['edit']) ? htmlspecialchars('Cabinet ' . explode('/', $_GET['edit'])[0]) : '' ?>" required>
+                    <label for="department_id" data-error="">Department:</label>
+                    <select id="department_id" name="department_id" onchange="loadSubDepartments()" required>
                         <option value="">Select Department</option>
                         <?php foreach ($departments as $dept): ?>
-                            <option value="<?= htmlspecialchars($dept['Department_id'], ENT_QUOTES, 'UTF-8') ?>" 
-                                    <?= isset($editFile) && $editFile['Department_id'] == $dept['Department_id'] ? 'selected' : '' ?>>
-                                <?= htmlspecialchars($dept['Department_name'], ENT_QUOTES, 'UTF-8') ?>
+                            <option value="<?= $dept['department_id'] ?>" <?= isset($_GET['edit']) && ($storage_locations[$_GET['edit']]['department_id'] ?? '') == $dept['department_id'] ? 'selected' : '' ?>>
+                                <?= htmlspecialchars($dept['department_name']) ?>
                             </option>
                         <?php endforeach; ?>
                     </select>
-                    <select name="sub_department_id" id="sub_department_id">
+                    <label for="sub_department_id" data-error="">Sub-Department (Optional):</label>
+                    <select id="sub_department_id" name="sub_department_id" data-selected="<?= isset($_GET['edit']) ? htmlspecialchars($storage_locations[$_GET['edit']]['sub_department_id'] ?? '') : '' ?>">
                         <option value="">Select Sub-Department (Optional)</option>
                     </select>
-                    <input type="text" name="building" placeholder="Building" value="<?= htmlspecialchars($locationParts[0] ?? '', ENT_QUOTES, 'UTF-8') ?>" required>
-                    <input type="text" name="room" placeholder="Room" value="<?= htmlspecialchars($locationParts[1] ?? '', ENT_QUOTES, 'UTF-8') ?>" required>
-                    <input type="number" name="layer" placeholder="Layer" min="1" value="<?= htmlspecialchars(explode(' ', $layerBoxFolder[0])[1] ?? 1, ENT_QUOTES, 'UTF-8') ?>" required>
-                    <input type="number" name="box" placeholder="Box" min="1" value="<?= htmlspecialchars(explode(' ', $layerBoxFolder[1])[1] ?? 1, ENT_QUOTES, 'UTF-8') ?>" required>
-                    <input type="number" name="folder" placeholder="Folder" min="1" value="<?= htmlspecialchars(explode(' ', $layerBoxFolder[2])[1] ?? 1, ENT_QUOTES, 'UTF-8') ?>" required>
-                    <input type="number" name="folder_capacity" placeholder="Folder Capacity (Max Files)" min="1" value="<?= htmlspecialchars($editFile['Folder_capacity'] ?? 10, ENT_QUOTES, 'UTF-8') ?>" required>
-                    <button type="submit"><?= isset($_GET['edit']) ? 'Update Storage Assignment' : 'Assign to Storage' ?></button>
+                    <label for="storage_location" data-error="">Storage Location (e.g., Archive Room 101):</label>
+                    <input type="text" id="storage_location" name="storage_location" value="<?= isset($_GET['edit']) ? htmlspecialchars($storage_locations[$_GET['edit']]['storage_location'] ?? '') : '' ?>" required>
+                    <label for="storage_capacity" data-error="">Storage Capacity (Number of Files):</label>
+                    <input type="number" id="storage_capacity" name="storage_capacity" value="<?= isset($_GET['edit']) ? htmlspecialchars($storage_locations[$_GET['edit']]['storage_capacity'] ?? '') : '' ?>" min="1" required>
+                    <div class="buttons">
+                        <button type="submit" class="confirm-btn">Save</button>
+                        <button type="button" class="cancel-btn" onclick="closeModal('storage-modal')">Cancel</button>
+                    </div>
                 </form>
             </div>
         </div>
 
-        <!-- File Search Form -->
-        <div class="file-search-form">
-            <h3>Search Physical Files</h3>
-            <form method="POST" action="physical_storage_management.php">
-                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken(), ENT_QUOTES, 'UTF-8') ?>">
-                <div class="search-filters">
-                    <input type="text" name="file_name" placeholder="File Name (optional)" class="search-input">
-                    <select name="department_id" class="search-select">
-                        <option value="">All Departments</option>
-                        <?php foreach ($departments as $dept): ?>
-                            <option value="<?= htmlspecialchars($dept['Department_id'], ENT_QUOTES, 'UTF-8') ?>">
-                                <?= htmlspecialchars($dept['Department_name'], ENT_QUOTES, 'UTF-8') ?>
-                            </option>
+        <div class="modal assign-form" id="assign-file-modal">
+            <div class="modal-content">
+                <span class="close" onclick="closeModal('assign-file-modal')">&times;</span>
+                <h2>Assign File</h2>
+                <form action="physical_storage_management.php" method="POST">
+                    <input type="hidden" name="assign_file" value="1">
+                    <input type="hidden" name="physical_storage_path" id="assign_physical_storage_path">
+                    <label for="file_id" data-error="">File:</label>
+                    <select id="file_id" name="file_id" required>
+                        <option value="">Select File</option>
+                        <?php foreach ($unassigned_files as $file): ?>
+                            <option value="<?= $file['file_id'] ?>"><?= htmlspecialchars($file['file_name']) ?></option>
                         <?php endforeach; ?>
                     </select>
-                    <select name="document_type_id" class="search-select">
-                        <option value="">All Document Types</option>
-                        <?php
-                        $docTypesStmt = executeQuery($pdo, "SELECT Document_type_id, Field_label FROM documents_type_fields ORDER BY Field_label ASC");
-                        $docTypes = $docTypesStmt ? $docTypesStmt->fetchAll(PDO::FETCH_ASSOC) : [];
-                        foreach ($docTypes as $doc_type): ?>
-                            <option value="<?= htmlspecialchars($doc_type['Document_type_id'], ENT_QUOTES, 'UTF-8') ?>">
-                                <?= htmlspecialchars($doc_type['Field_label'], ENT_QUOTES, 'UTF-8') ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                    <input type="date" name="date_from" placeholder="From Date" class="search-input" title="Start date of upload">
-                    <input type="date" name="date_to" placeholder="To Date" class="search-input" title="End date of upload">
-                    <select name="uploader_id" class="search-select">
-                        <option value="">All Uploaders</option>
-                        <?php
-                        $usersStmt = executeQuery($pdo, "SELECT User_id, Username FROM users ORDER BY Username ASC");
-                        $users = $usersStmt ? $usersStmt->fetchAll(PDO::FETCH_ASSOC) : [];
-                        foreach ($users as $user): ?>
-                            <option value="<?= htmlspecialchars($user['User_id'], ENT_QUOTES, 'UTF-8') ?>">
-                                <?= htmlspecialchars($user['Username'], ENT_QUOTES, 'UTF-8') ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                    <button type="submit" name="search_files" class="search-btn"><i class="fas fa-search"></i> Search</button>
-                </div>
-            </form>
-            <?php
-            if (isset($_POST['search_files']) && validateCsrfToken($_POST['csrf_token'])) {
-                $query = "
-                    SELECT f.File_id, f.File_name, f.File_path, f.Upload_date, d.Department_name, u.Username, dt.Field_label AS Document_type
-                    FROM files f
-                    LEFT JOIN departments d ON f.Department_id = d.Department_id
-                    LEFT JOIN users u ON f.User_id = u.User_id
-                    LEFT JOIN documents_type_fields dt ON f.Document_type_id = dt.Document_type_id
-                    WHERE f.Copy_type = 'hard_copy'";
-                $params = [];
-
-                if (!empty($_POST['file_name'])) {
-                    $query .= " AND f.File_name LIKE ?";
-                    $params[] = '%' . filter_input(INPUT_POST, 'file_name', FILTER_SANITIZE_FULL_SPECIAL_CHARS) . '%';
-                }
-                if (!empty($_POST['department_id'])) {
-                    $query .= " AND f.Department_id = ?";
-                    $params[] = filter_var($_POST['department_id'], FILTER_VALIDATE_INT);
-                }
-                if (!empty($_POST['document_type_id'])) {
-                    $query .= " AND f.Document_type_id = ?";
-                    $params[] = filter_var($_POST['document_type_id'], FILTER_VALIDATE_INT);
-                }
-                if (!empty($_POST['date_from'])) {
-                    $query .= " AND f.Upload_date >= ?";
-                    $params[] = filter_input(INPUT_POST, 'date_from', FILTER_SANITIZE_FULL_SPECIAL_CHARS) . ' 00:00:00';
-                }
-                if (!empty($_POST['date_to'])) {
-                    $query .= " AND f.Upload_date <= ?";
-                    $params[] = filter_input(INPUT_POST, 'date_to', FILTER_SANITIZE_FULL_SPECIAL_CHARS) . ' 23:59:59';
-                }
-                if (!empty($_POST['uploader_id'])) {
-                    $query .= " AND f.User_id = ?";
-                    $params[] = filter_var($_POST['uploader_id'], FILTER_VALIDATE_INT);
-                }
-
-                $query .= " ORDER BY f.Upload_date DESC";
-                $stmt = executeQuery($pdo, $query, $params);
-                $results = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [];
-
-                echo '<div class="search-results">';
-                if ($results) {
-                    echo '<table class="results-table">';
-                    echo '<thead><tr><th>File Name</th><th>Department</th><th>Document Type</th><th>Uploader</th><th>Upload Date</th><th>Location</th></tr></thead>';
-                    echo '<tbody>';
-                    foreach ($results as $result) {
-                        echo '<tr>';
-                        echo '<td>' . htmlspecialchars($result['File_name'], ENT_QUOTES, 'UTF-8') . '</td>';
-                        echo '<td>' . htmlspecialchars($result['Department_name'] ?? 'Unknown', ENT_QUOTES, 'UTF-8') . '</td>';
-                        echo '<td>' . htmlspecialchars($result['Document_type'] ?? 'N/A', ENT_QUOTES, 'UTF-8') . '</td>';
-                        echo '<td>' . htmlspecialchars($result['Username'] ?? 'Unknown', ENT_QUOTES, 'UTF-8') . '</td>';
-                        echo '<td>' . htmlspecialchars($result['Upload_date'], ENT_QUOTES, 'UTF-8') . '</td>';
-                        echo '<td>' . htmlspecialchars($result['File_path'] ?? 'N/A', ENT_QUOTES, 'UTF-8') . '</td>';
-                        echo '</tr>';
-                    }
-                    echo '</tbody></table>';
-                } else {
-                    echo '<p class="no-results">No files found matching your criteria.</p>';
-                }
-                echo '</div>';
-            }
-            ?>
-        </div>
-
-        <!-- Files by Department -->
-        <div class="table-container">
-            <h3>Physical Files by Department</h3>
-            <?php if (empty($departments_with_files)): ?>
-                <p>No physical files found.</p>
-            <?php else: ?>
-                <?php foreach ($departments_with_files as $dept_id => $dept): ?>
-                    <div class="department-section">
-                        <div class="dept-header">
-                            <h2><?= htmlspecialchars($dept['name'], ENT_QUOTES, 'UTF-8') ?></h2>
-                            <div class="action-buttons">
-                                <i class="fas fa-chevron-down toggle-files"></i>
-                            </div>
-                        </div>
-                        <div class="file-table">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>File ID</th>
-                                        <th>File Name</th>
-                                        <th>Location</th>
-                                        <th>Uploader</th>
-                                        <th>Document Type</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php foreach ($dept['files'] as $file): ?>
-                                        <tr>
-                                            <td><?= htmlspecialchars($file['File_id'], ENT_QUOTES, 'UTF-8') ?></td>
-                                            <td><?= htmlspecialchars($file['File_name'], ENT_QUOTES, 'UTF-8') ?></td>
-                                            <td><?= htmlspecialchars($file['File_path'] ?? 'N/A', ENT_QUOTES, 'UTF-8') ?></td>
-                                            <td><?= htmlspecialchars($file['Username'] ?? 'Unknown', ENT_QUOTES, 'UTF-8') ?></td>
-                                            <td><?= htmlspecialchars($file['Document_type'] ?? 'N/A', ENT_QUOTES, 'UTF-8') ?></td>
-                                            <td class="action-buttons">
-                                                <a href="physical_storage_management.php?edit=<?= htmlspecialchars($file['File_id'], ENT_QUOTES, 'UTF-8') ?>&csrf_token=<?= htmlspecialchars(generateCsrfToken(), ENT_QUOTES, 'UTF-8') ?>">
-                                                    <button class="edit-btn">Edit</button>
-                                                </a>
-                                                <button class="remove-btn" onclick="confirmRemoveFile(<?= htmlspecialchars($file['File_id'], ENT_QUOTES, 'UTF-8') ?>)">Remove</button>
-                                            </td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
-                        </div>
+                    <div class="buttons">
+                        <button type="submit" class="confirm-btn">Assign</button>
+                        <button type="button" class="cancel-btn" onclick="closeModal('assign-file-modal')">Cancel</button>
                     </div>
-                <?php endforeach; ?>
-            <?php endif; ?>
+                </form>
+            </div>
         </div>
 
-        <!-- Warning Modal for File Removal -->
         <div class="modal warning-modal" id="warning-remove-file-modal">
             <div class="warning-modal-content">
-                <span class="close">×</span>
+                <span class="close" onclick="closeModal('warning-remove-file-modal')">&times;</span>
                 <h2>Warning</h2>
-                <p>Are you sure you want to remove this file from storage? This action cannot be undone.</p>
+                <p>Are you sure you want to remove this file? This action cannot be undone.</p>
                 <div class="buttons">
                     <button class="confirm-btn" id="confirm-remove-file">Yes</button>
-                    <button class="cancel-btn">No</button>
+                    <button class="cancel-btn" onclick="closeModal('warning-remove-file-modal')">No</button>
                 </div>
             </div>
+        </div>
+        <div role="tree" aria-label="Department Storage">
+            <?php foreach ($storage_locations as $dept_id => $dept_data): ?>
+                <section class="department-section" role="treeitem" aria-level="1" data-department="<?= htmlspecialchars($dept_data['department_name']) ?>">
+                    <h2><?= htmlspecialchars($dept_data['department_name']) ?></h2>
+                    <?php foreach ($dept_data['locations'] as $location => $location_data): ?>
+                        <div class="location-section" role="treeitem" aria-level="2" data-location="<?= htmlspecialchars($location) ?>">
+                            <h3><?= htmlspecialchars($location) ?></h3>
+                            <div class="cabinet-grid">
+                                <?php foreach ($location_data['cabinets'] as $cabinet): ?>
+                                    <div class="cabinet-card" role="treeitem" aria-level="3">
+                                        <div class="card-header">
+                                            <h4><?= htmlspecialchars($cabinet['cabinet_name']) ?></h4>
+                                            <div class="card-actions">
+                                                <a href="?edit=<?= htmlspecialchars($cabinet['physical_storage_path']) ?>" class="edit-btn" title="Edit Cabinet"><i class="fas fa-edit"></i></a>
+                                                <a href="?delete=<?= htmlspecialchars($cabinet['physical_storage_path']) ?>" class="delete-btn" onclick="return confirm('Are you sure you want to delete this cabinet?')" title="Delete Cabinet"><i class="fas fa-trash"></i></a>
+                                                <button class="toggle-details" data-target="cabinet-details-<?= htmlspecialchars($cabinet['physical_storage_path']) ?>" aria-expanded="false" aria-controls="cabinet-details-<?= htmlspecialchars($cabinet['physical_storage_path']) ?>" title="Toggle Details"><i class="fas fa-chevron-down"></i></button>
+                                            </div>
+                                        </div>
+                                        <p><strong>Path:</strong> <?= htmlspecialchars($cabinet['physical_storage_path']) ?></p>
+                                        <div class="cabinet-details" id="cabinet-details-<?= htmlspecialchars($cabinet['physical_storage_path']) ?>" role="group" hidden>
+                                            <?php $storage_details = fetchStorageDetails($pdo, $cabinet['physical_storage_path']); ?>
+                                            <?php foreach ($storage_details as $layer => $boxes): ?>
+                                                <div class="hierarchy-level layer-level" role="treeitem" aria-level="4">
+                                                    <h5>Layer <?= htmlspecialchars($layer) ?></h5>
+                                                    <?php foreach ($boxes as $box => $folders): ?>
+                                                        <div class="hierarchy-level box-level" role="treeitem" aria-level="5">
+                                                            <h6>Box <?= htmlspecialchars($box) ?></h6>
+                                                            <?php foreach ($folders as $folder => $data): ?>
+                                                                <div class="hierarchy-level folder-level" role="treeitem" aria-level="6">
+                                                                    <h6>Folder <?= htmlspecialchars($folder) ?> <span class="status <?= $data['file_count'] > 0 ? 'occupied' : 'available' ?>"><?= $data['file_count'] > 0 ? 'Occupied' : 'Available' ?></span></h6>
+                                                                    <div class="capacity-controls">
+                                                                        <span class="capacity-display"><?= htmlspecialchars($data['file_count']) . '/' . htmlspecialchars($data['capacity']) ?></span>
+                                                                        <input type="range" class="capacity-slider" min="0" max="<?= htmlspecialchars($data['capacity']) ?>" value="<?= htmlspecialchars($data['file_count']) ?>" disabled aria-label="Storage capacity">
+                                                                        <div class="capacity-progress">
+                                                                            <div class="progress-bar <?= $data['file_count'] / $data['capacity'] >= 0.8 ? 'warning' : '' ?> <?= $data['file_count'] >= $data['capacity'] ? 'full' : '' ?>" style="width: <?= min(($data['file_count'] / $data['capacity'] * 100), 100) ?>%"></div>
+                                                                        </div>
+                                                                    </div>
+                                                                    <table class="storage-table" data-sortable>
+                                                                        <thead>
+                                                                            <tr>
+                                                                                <th data-sort="file_name">File Name <i class="fas fa-sort"></i></th>
+                                                                                <th data-sort="uploader">Uploader <i class="fas fa-sort"></i></th>
+                                                                                <th data-sort="category">Category <i class="fas fa-sort"></i></th>
+                                                                                <th>Actions</th>
+                                                                            </tr>
+                                                                        </thead>
+                                                                        <tbody>
+                                                                            <?php if (empty($data['files'])): ?>
+                                                                                <tr>
+                                                                                    <td colspan="3">No files assigned</td>
+                                                                                    <td>
+                                                                                        <form class="inline-assign-form" action="physical_storage_management.php" method="POST">
+                                                                                            <input type="hidden" name="assign_file" value="1">
+                                                                                            <input type="hidden" name="physical_storage_path" value="<?= htmlspecialchars($data['id']) ?>">
+                                                                                            <select name="file_id" required onchange="this.form.submit()" aria-label="Assign file to folder">
+                                                                                                <option value="">Assign File</option>
+                                                                                                <?php foreach ($unassigned_files as $file): ?>
+                                                                                                    <option value="<?= $file['file_id'] ?>"><?= htmlspecialchars($file['file_name']) ?></option>
+                                                                                                <?php endforeach; ?>
+                                                                                            </select>
+                                                                                        </form>
+                                                                                        <button class="action-btn assign-btn" onclick="showAssignForm('<?= htmlspecialchars($data['id']) ?>')" title="Detailed Assign">Detailed Assign</button>
+                                                                                    </td>
+                                                                                </tr>
+                                                                            <?php else: ?>
+                                                                                <?php foreach ($data['files'] as $file): ?>
+                                                                                    <tr>
+                                                                                        <td><?= htmlspecialchars($file['file_name']) ?></td>
+                                                                                        <td><?= htmlspecialchars($file['uploader'] ?? 'Unknown') ?></td>
+                                                                                        <td><?= htmlspecialchars($file['document_category'] ?? 'N/A') ?></td>
+                                                                                        <td>
+                                                                                            <form class="inline-assign-form" action="physical_storage_management.php" method="POST">
+                                                                                                <input type="hidden" name="assign_file" value="1">
+                                                                                                <input type="hidden" name="physical_storage_path" value="<?= htmlspecialchars($data['id']) ?>">
+                                                                                                <select name="file_id" required onchange="this.form.submit()" aria-label="Assign file to folder">
+                                                                                                    <option value="">Assign File</option>
+                                                                                                    <?php foreach ($unassigned_files as $uf): ?>
+                                                                                                        <option value="<?= $uf['file_id'] ?>"><?= htmlspecialchars($uf['file_name']) ?></option>
+                                                                                                    <?php endforeach; ?>
+                                                                                                </select>
+                                                                                            </form>
+                                                                                            <button class="action-btn remove-btn" onclick="confirmRemoveFile(<?= htmlspecialchars($file['file_id']) ?>, '<?= htmlspecialchars($data['id']) ?>')" title="Remove File">Remove</button>
+                                                                                        </td>
+                                                                                    </tr>
+                                                                                <?php endforeach; ?>
+                                                                            <?php endif; ?>
+                                                                        </tbody>
+                                                                    </table>
+                                                                </div>
+                                                            <?php endforeach; ?>
+                                                        </div>
+                                                    <?php endforeach; ?>
+                                                </div>
+                                            <?php endforeach; ?>
+                                        </div>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                </section>
+            <?php endforeach; ?>
         </div>
     </div>
 
     <script>
-        // Initialize Notyf for notifications
-        const notyf = new Notyf({
-            duration: 5000,
-            position: { x: 'right', y: 'top' },
-            ripple: true
-        });
-
         document.addEventListener('DOMContentLoaded', () => {
-            // Sidebar toggle
-            const sidebar = document.querySelector('.sidebar');
-            const mainContent = document.querySelector('.main-content');
-            const toggleBtn = document.querySelector('.toggle-btn');
-
-            toggleBtn.addEventListener('click', () => {
-                sidebar.classList.toggle('minimized');
-                mainContent.classList.toggle('sidebar-expanded');
-                mainContent.classList.toggle('sidebar-minimized');
-            });
-
-            // Storage Modal
-            const storageModal = document.getElementById("storage-modal");
-            const openModalBtn = document.getElementById("open-modal-btn");
-            const closeModalBtn = storageModal.querySelector(".close");
-
-            openModalBtn.onclick = () => storageModal.style.display = "flex";
-            closeModalBtn.onclick = () => storageModal.style.display = "none";
-
-            // Warning Modal
-            const warningModal = document.getElementById("warning-remove-file-modal");
-            const closeWarningModalBtn = warningModal.querySelector(".close");
-            const cancelWarningBtn = warningModal.querySelector(".cancel-btn");
-
-            closeWarningModalBtn.onclick = () => warningModal.style.display = "none";
-            cancelWarningBtn.onclick = () => warningModal.style.display = "none";
-
-            // Close modals when clicking outside
-            window.onclick = (event) => {
-                if (event.target === storageModal) storageModal.style.display = "none";
-                if (event.target === warningModal) warningModal.style.display = "none";
-            };
-
-            // Auto-open modal for editing
-            <?php if (isset($_GET['edit'])): ?>
-                storageModal.style.display = "flex";
-                loadSubDepartments();
-            <?php endif; ?>
-
-            // Toggle file tables
-            document.querySelectorAll('.toggle-files').forEach(toggle => {
-                toggle.addEventListener('click', () => {
-                    const fileTable = toggle.closest('.department-section').querySelector('.file-table');
-                    fileTable.style.display = fileTable.style.display === 'block' ? 'none' : 'block';
-                    toggle.classList.toggle('fa-chevron-down');
-                    toggle.classList.toggle('fa-chevron-up');
-                });
-            });
-
             // Form validation
-            document.querySelectorAll('form').forEach(form => {
-                form.addEventListener('submit', (e) => {
-                    const csrfToken = document.getElementById('csrf_token').value;
-                    if (!csrfToken) {
-                        e.preventDefault();
-                        notyf.error('CSRF token missing');
+            document.getElementById('physical_storage_path').addEventListener('input', (e) => {
+                const input = e.target;
+                const regex = /^[A-Z][0-9]+(\/[A-Z][0-9]+){0,3}$/;
+                const label = input.previousElementSibling;
+                if (!regex.test(input.value)) {
+                    label.classList.add('error');
+                    label.setAttribute('data-error', 'Invalid format. Use C1/L1/B1/F1');
+                } else {
+                    label.classList.remove('error');
+                    label.setAttribute('data-error', '');
+                }
+            });
+
+            document.getElementById('storage_capacity').addEventListener('input', (e) => {
+                const input = e.target;
+                const label = input.previousElementSibling;
+                if (input.value < 1) {
+                    label.classList.add('error');
+                    label.setAttribute('data-error', 'Capacity must be at least 1');
+                } else {
+                    label.classList.remove('error');
+                    label.setAttribute('data-error', '');
+                }
+            });
+
+            document.getElementById('cabinet_name').addEventListener('input', (e) => {
+                const input = e.target;
+                const label = input.previousElementSibling;
+                if (input.value.trim() === '') {
+                    label.classList.add('error');
+                    label.setAttribute('data-error', 'Cabinet name is required');
+                } else {
+                    label.classList.remove('error');
+                    label.setAttribute('data-error', '');
+                }
+            });
+
+            // Form submission with toast feedback
+            document.querySelectorAll('.storage-form form, .inline-assign-form').forEach(form => {
+                form.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const submitBtn = form.querySelector('.confirm-btn') || form.querySelector('select');
+                    submitBtn.disabled = true;
+                    if (submitBtn.tagName === 'SELECT') submitBtn.classList.add('loading');
+
+                    try {
+                        const response = await fetch(form.action, {
+                            method: 'POST',
+                            body: new FormData(form)
+                        });
+                        const result = await response.json();
+                        if (result.success) {
+                            showToast(result.message);
+                            setTimeout(() => location.reload(), 1000);
+                        } else {
+                            showToast(result.message, 'error');
+                        }
+                    } catch (error) {
+                        showToast('An error occurred', 'error');
+                    } finally {
+                        submitBtn.disabled = false;
+                        if (submitBtn.tagName === 'SELECT') submitBtn.classList.remove('loading');
                     }
                 });
             });
-        });
 
-        // Load sub-departments dynamically
-        function loadSubDepartments() {
-            const deptId = document.getElementById('department_id').value;
-            const subDeptSelect = document.getElementById('sub_department_id');
-            subDeptSelect.innerHTML = '<option value="">Select Sub-Department (Optional)</option>';
-            if (deptId) {
-                fetch(`get_sub_departments.php?department_id=${encodeURIComponent(deptId)}`)
-                    .then(response => response.json())
-                    .then(data => {
-                        if (Array.isArray(data)) {
-                            data.forEach(sub => {
-                                const option = document.createElement('option');
-                                option.value = sub.id;
-                                option.textContent = sub.name;
-                                subDeptSelect.appendChild(option);
-                            });
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error fetching sub-departments:', error);
-                        notyf.error('Failed to load sub-departments');
-                    });
-            }
-        }
-
-        // File removal confirmation
-        let pendingFileId = null;
-        function confirmRemoveFile(fileId) {
-            pendingFileId = fileId;
-            document.getElementById('warning-remove-file-modal').style.display = 'flex';
-        }
-
-        document.getElementById('confirm-remove-file').addEventListener('click', () => {
-            if (pendingFileId !== null) {
-                const formData = new FormData();
-                formData.append('action', 'remove_file');
-                formData.append('file_id', pendingFileId);
-                formData.append('csrf_token', document.getElementById('csrf_token').value);
-
-                fetch('physical_storage_management.php', {
-                    method: 'POST',
-                    body: formData
-                }).then(response => {
-                    if (!response.ok) throw new Error('Network response was not ok');
-                    location.reload();
-                }).catch(error => {
-                    notyf.error('Failed to remove file: ' + error.message);
+            // Toggle cabinet details
+            document.querySelectorAll('.toggle-details').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const targetId = btn.dataset.target;
+                    const target = document.getElementById(targetId);
+                    const isExpanded = btn.getAttribute('aria-expanded') === 'true';
+                    btn.setAttribute('aria-expanded', !isExpanded);
+                    btn.querySelector('i').className = isExpanded ? 'fas fa-chevron-down' : 'fas fa-chevron-up';
+                    target.hidden = isExpanded;
                 });
-                document.getElementById('warning-remove-file-modal').style.display = 'none';
-                pendingFileId = null;
+            });
+
+            // Table sorting
+            document.querySelectorAll('[data-sortable] th[data-sort]').forEach(th => {
+                th.addEventListener('click', () => {
+                    const table = th.closest('table');
+                    const rows = Array.from(table.querySelectorAll('tbody tr'));
+                    const index = Array.from(th.parentElement.children).indexOf(th);
+                    const key = th.dataset.sort;
+                    const asc = th.classList.toggle('asc');
+                    th.querySelector('i').className = asc ? 'fas fa-sort-up' : 'fas fa-sort-down';
+
+                    rows.sort((a, b) => {
+                        let aValue = a.children[index].textContent.trim();
+                        let bValue = b.children[index].textContent.trim();
+                        return asc ? aValue.localeCompare(bValue) : bValue.localeCompare(aValue);
+                    });
+
+                    table.querySelector('tbody').innerHTML = '';
+                    rows.forEach(row => table.querySelector('tbody').appendChild(row));
+                });
+            });
+
+            // Load sub-departments
+            function loadSubDepartments() {
+                const deptId = document.getElementById('department_id').value;
+                const subDeptSelect = document.getElementById('sub_department_id');
+                subDeptSelect.innerHTML = '<option value="">Select Sub-Department (Optional)</option>';
+                if (deptId) {
+                    const subDepts = <?= json_encode($sub_departments) ?>.filter(d => d.parent_department_id == deptId);
+                    subDepts.forEach(d => {
+                        const option = document.createElement('option');
+                        option.value = d.department_id;
+                        option.textContent = d.department_name;
+                        subDeptSelect.appendChild(option);
+                    });
+                }
             }
+
+            document.getElementById('department_id').addEventListener('change', loadSubDepartments);
+            loadSubDepartments();
         });
+
+        function openModal(modalId) {
+            const modal = document.getElementById(modalId);
+            modal.style.display = 'block';
+            modal.classList.add('active');
+            document.querySelector('.modal-backdrop').classList.add('active');
+            trapFocus(modalId);
+            modal.querySelector('input, button, select')?.focus();
+        }
+
+        function closeModal(modalId) {
+            const modal = document.getElementById(modalId);
+            modal.style.display = 'none';
+            modal.classList.remove('active');
+            document.querySelector('.modal-backdrop').classList.remove('active');
+        }
+
+        function trapFocus(modalId) {
+            const modal = document.getElementById(modalId);
+            const focusableElements = modal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+            const firstElement = focusableElements[0];
+            const lastElement = focusableElements[focusableElements.length - 1];
+
+            modal.addEventListener('keydown', (e) => {
+                if (e.key === 'Tab') {
+                    if (e.shiftKey && document.activeElement === firstElement) {
+                        e.preventDefault();
+                        lastElement.focus();
+                    } else if (!e.shiftKey && document.activeElement === lastElement) {
+                        e.preventDefault();
+                        firstElement.focus();
+                    }
+                }
+            });
+        }
+
+        function showToast(message, type = 'success') {
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.classList.add('show'), 100);
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        function showAssignForm(physicalStoragePath) {
+            document.getElementById('assign_physical_storage_path').value = physicalStoragePath;
+            openModal('assign-file-modal');
+        }
+
+        const fileManager = {
+            pendingFileId: null,
+            pendingLocationId: null,
+            confirmRemoveFile(fileId, physicalStoragePath) {
+                this.pendingFileId = fileId;
+                this.pendingLocationId = physicalStoragePath;
+                openModal('warning-remove-file-modal');
+            },
+            async removeFile() {
+                if (this.pendingFileId !== null && this.pendingLocationId !== null) {
+                    try {
+                        const response = await fetch('Physical_Storage_Management.php', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/x-www-form-urlencoded'
+                            },
+                            body: `remove_file=1&file_id=${this.pendingFileId}&physical_storage_path=${encodeURIComponent(this.pendingLocationId)}`
+                        });
+                        const result = await response.json();
+                        if (result.success) {
+                            showToast(result.message);
+                            setTimeout(() => location.reload(), 1000);
+                        } else {
+                            showToast(result.message, 'error');
+                        }
+                    } catch (error) {
+                        showToast('Failed to remove file: ' + error.message, 'error');
+                    }
+                    closeModal('warning-remove-file-modal');
+                    this.pendingFileId = null;
+                    this.pendingLocationId = null;
+                }
+            }
+        };
+
+        function confirmRemoveFile(fileId, physicalStoragePath) {
+            fileManager.confirmRemoveFile(fileId, physicalStoragePath);
+        }
+
+        document.getElementById('open-modal-btn').addEventListener('click', () => openModal('storage-modal'));
+        document.getElementById('confirm-remove-file').addEventListener('click', () => fileManager.removeFile());
     </script>
 </body>
+
 </html>

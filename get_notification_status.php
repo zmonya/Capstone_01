@@ -61,11 +61,11 @@ try {
 
     global $pdo;
 
-    // Fetch notification status from transaction table
+    // Fetch notification status from transactions table
     $stmt = $pdo->prepare("
-        SELECT Transaction_status AS status 
-        FROM transaction 
-        WHERE Transaction_id = ? AND User_id = ? AND Transaction_type = 12
+        SELECT description AS status 
+        FROM transactions 
+        WHERE transaction_id = ? AND user_id = ? AND transaction_type = 'notification'
     ");
     $stmt->execute([$notificationId, $userId]);
     $notification = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -74,10 +74,10 @@ try {
         sendResponse(false, 'Notification not found or unauthorized.', [], 404);
     }
 
-    // Log request in transaction table
+    // Log request in transactions table
     $stmt = $pdo->prepare("
-        INSERT INTO transaction (User_id, Transaction_status, Transaction_type, Time, Massage)
-        VALUES (?, 'completed', 18, NOW(), ?)
+        INSERT INTO transactions (user_id, transaction_type, transaction_time, description)
+        VALUES (?, 'fetch_status', NOW(), ?)
     ");
     $stmt->execute([$userId, "Fetched notification status for ID $notificationId"]);
 
