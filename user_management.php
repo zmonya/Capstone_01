@@ -353,6 +353,7 @@ try {
 <html lang="en">
 
 <head>
+    <link rel="stylesheet" href="style/admin-interface.css">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="X-Content-Type-Options" content="nosniff">
@@ -535,7 +536,7 @@ try {
         <a href="dashboard.php" data-tooltip="Switch to Client View"><i class="fas fa-exchange-alt"></i><span class="link-text">Switch to Client View</span></a>
         <a href="admin_dashboard.php" data-tooltip="Dashboard"><i class="fas fa-home"></i><span class="link-text">Dashboard</span></a>
         <a href="admin_search.php" data-tooltip="View All Files"><i class="fas fa-search"></i><span class="link-text">View All Files</span></a>
-        <a href="user_management.php" class="active" data-tooltip="User Management"><i class="fas fa-users"></i><span class="link-text">User Management</span></a>
+        <a href="user_management.php" class="active" data-tooltip="User Management"><i class="fas fa-users"></i><span class="link-text">User Managementaw</span></a>
         <a href="department_management.php" data-tooltip="Department Management"><i class="fas fa-building"></i><span class="link-text">Department Management</span></a>
         <a href="physical_storage_management.php" data-tooltip="Physical Storage"><i class="fas fa-archive"></i><span class="link-text">Physical Storage</span></a>
         <a href="logout.php" class="logout-btn" data-tooltip="Logout"><i class="fas fa-sign-out-alt"></i><span class="link-text">Logout</span></a>

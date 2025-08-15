@@ -40,7 +40,7 @@ try {
         throw new Exception('Invalid file or access denied.');
     }
 
-    $insertStmt = $pdo->prepare("INSERT INTO transaction (File_id, User_id, Users_Department_id, Transaction_type, Transaction_status, Time, Massage) VALUES (?, ?, ?, 2, 'pending', NOW(), 'File sent for review')");
+    $insertStmt = $pdo->prepare("INSERT IN    $insertStmt = $pdo->prepare("INSERT INTO transaction (File_id, User_id, Users_Department_id, Transaction_type, Transaction_status, Time, Massage) VALUES (?, ?, ?, 2, 'pending', NOW(), 'File sent for review')");
 
     foreach ($recipients as $recipient) {
         if ($recipient['type'] === 'user') {
@@ -67,8 +67,7 @@ try {
     }
 
     logActivity((int)$_SESSION['user_id'], 'file_sent', (int)$fileId, null, null, '2');
-    $pdo->commit();
-    echo json_encode(['success' => true, 'message' => 'File sent successfully.']);
+=> true, 'message' => 'File sent successfully.']);
 } catch (Exception $e) {
     $pdo->rollBack();
     error_log("Send file error: " . $e->getMessage());
