@@ -40,16 +40,33 @@ try {
         throw new Exception('Invalid file or access denied.');
     }
 
-    $insertStmt = $pdo->prepare("INSERT INTO transaction (File_id, User_id, Users_Department_id, Transaction_type, Transaction_status, Time, Message) VALUES (?, ?, ?, 2, 'pending', NOW(), 'File sent for review')");
+    $insertStmt = $pdo->prepare("INSERT INTO transaction (File_id, User_id, Users_Department_id, Transaction_type, Transaction_status, Time, Massage) VALUES (?, ?, ?, 2, 'pending', NOW(), 'File sent for review')");
 
     foreach ($recipients as $recipient) {
-        $userId = ($recipient['type'] === 'user') ? $recipient['id'] : null;
-        $deptId = ($recipient['type'] === 'department') ? $recipient['id'] : null;
-        error_log("Inserting transaction for file $fileId to user $userId or department $deptId");
-        $insertStmt->execute([$fileId, $userId, $deptId]);
+        if ($recipient['type'] === 'user') {
+            // Find Users_Department_id for this user (if any)
+            $userId = $recipient['id'];
+            $stmtDept = $pdo->prepare("SELECT Users_Department_id FROM users_department WHERE User_id = ? LIMIT 1");
+            $stmtDept->execute([$userId]);
+            $usersDeptId = $stmtDept->fetchColumn();
+            error_log("Inserting transaction for file $fileId to user $userId, Users_Department_id $usersDeptId");
+            $insertStmt->execute([$fileId, $userId, $usersDeptId]);
+        } elseif ($recipient['type'] === 'department') {
+            // Send to all users in the department
+            $deptId = $recipient['id'];
+            $stmtUsers = $pdo->prepare("SELECT User_id, Users_Department_id FROM users_department WHERE Department_id = ?");
+            $stmtUsers->execute([$deptId]);
+            $usersInDept = $stmtUsers->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($usersInDept as $userRow) {
+                $userId = $userRow['User_id'];
+                $usersDeptId = $userRow['Users_Department_id'];
+                error_log("Inserting transaction for file $fileId to user $userId in department $deptId, Users_Department_id $usersDeptId");
+                $insertStmt->execute([$fileId, $userId, $usersDeptId]);
+            }
+        }
     }
 
-    logActivity($_SESSION['user_id'], 2, "Sent file $fileId to " . count($recipients) . " recipients");
+    logActivity((int)$_SESSION['user_id'], 'file_sent', (int)$fileId, null, null, '2');
     $pdo->commit();
     echo json_encode(['success' => true, 'message' => 'File sent successfully.']);
 } catch (Exception $e) {

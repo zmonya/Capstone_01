@@ -356,9 +356,9 @@ function formatFileSize($bytes) {
                                             </div>
                                         </div>
                                         <div class="file-actions">
-                                            <button class="btn btn-sm btn-primary" onclick="viewFile(<?= $file['file_id'] ?>)">
-                                                <i class="fas fa-eye"></i> View
-                                            </button>
+                                        <a href="view_file_new.php?file_id=<?= $file['file_id'] ?>" class="btn btn-sm btn-primary">
+                                            <i class="fas fa-eye"></i> View
+                                        </a>
                                             <button class="btn btn-sm btn-success" onclick="downloadFile(<?= $file['file_id'] ?>)">
                                                 <i class="fas fa-download"></i> Download
                                             </button>
@@ -400,9 +400,9 @@ function formatFileSize($bytes) {
                                             </div>
                                         </div>
                                         <div class="file-actions">
-                                            <button class="btn btn-sm btn-primary" onclick="viewFile(<?= $file['file_id'] ?>)">
+                                            <a href="view_file_new.php?file_id=<?= $file['file_id'] ?>" class="btn btn-sm btn-primary">
                                                 <i class="fas fa-eye"></i> View
-                                            </button>
+                                            </a>
                                             <button class="btn btn-sm btn-success" onclick="downloadFile(<?= $file['file_id'] ?>)">
                                                 <i class="fas fa-download"></i> Download
                                             </button>
@@ -444,9 +444,9 @@ function formatFileSize($bytes) {
                                             </div>
                                         </div>
                                         <div class="file-actions">
-                                            <button class="btn btn-sm btn-primary" onclick="viewFile(<?= $file['file_id'] ?>)">
+                                            <a href="view_file_new.php?file_id=<?= $file['file_id'] ?>" class="btn btn-sm btn-primary">
                                                 <i class="fas fa-eye"></i> View
-                                            </button>
+                                            </a>
                                             <button class="btn btn-sm btn-success" onclick="downloadFile(<?= $file['file_id'] ?>)">
                                                 <i class="fas fa-download"></i> Download
                                             </button>

@@ -3,13 +3,14 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Generation Time: Aug 13, 2025 at 06:53 PM
+-- Generation Time: Aug 15, 2025 at 09:25 AM
 -- Server version: 10.4.32-MariaDB
--- PHP Version: 8.2.12
+-- PHP Version: 8.0.30
 
 SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
 START TRANSACTION;
 SET time_zone = "+00:00";
+
 
 /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
 /*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
@@ -119,7 +120,7 @@ CREATE TABLE `files` (
   `storage_capacity` int(11) DEFAULT NULL COMMENT 'Folder capacity (e.g., number of files)',
   `copy_type` varchar(50) DEFAULT NULL COMMENT 'Type of copy (e.g., copy, original)',
   `file_path` varchar(255) NOT NULL COMMENT 'File storage path'
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+) ;
 
 --
 -- Dumping data for table `files`
@@ -146,7 +147,8 @@ INSERT INTO `files` (`file_id`, `parent_file_id`, `file_name`, `meta_data`, `use
 (31, NULL, 'CamScanner 08-01-2025 17.20.pdf', 'Scanned document', 14, NULL, 570260, 'pdf', NULL, 'active', 'C1/L2/B1/F1', 'Archive Room 101', 50, NULL, 'uploads/8cdbf57b72014f68_CamScanner08-01-202517.20.pdf'),
 (32, 28, 'thesis_copy3.pdf', 'Thesis copy 3', 14, NULL, 9310558, 'pdf', NULL, 'active', 'C1/L2/B1/F1', 'Archive Room 101', 50, 'copy', 'uploads/06cf714570d972da_thesis.pdf'),
 (33, 28, 'thesis_copy4.pdf', 'Thesis copy 4', 14, NULL, 9310558, 'pdf', NULL, 'active', 'C1/L2/B1/F1', 'Archive Room 101', 50, 'copy', 'uploads/1e08e17f655934a2_thesis.pdf'),
-(34, NULL, 'CamScanner 08-01-2025 17.16.pdf', 'Scanned document', 14, NULL, 634638, 'pdf', NULL, 'active', 'C2/L1/B1/F1', 'Archive Room 102', 50, NULL, 'uploads/958acb384be0fa46_CamScanner08-01-202517.16.pdf');
+(34, NULL, 'CamScanner 08-01-2025 17.16.pdf', 'Scanned document', 14, NULL, 634638, 'pdf', NULL, 'active', 'C2/L1/B1/F1', 'Archive Room 102', 50, NULL, 'uploads/958acb384be0fa46_CamScanner08-01-202517.16.pdf'),
+(111, NULL, '484c2f5a-9131-4c51-a7a2-3ce814670c20.pdf', NULL, 14, '2025-08-15 13:12:45', 58972, 'pdf', NULL, 'active', NULL, NULL, NULL, NULL, 'Uploads/315a1ff32ff8a218_484c2f5a-9131-4c51-a7a2-3ce814670c20.pdf');
 
 -- --------------------------------------------------------
 
@@ -159,6 +161,13 @@ CREATE TABLE `text_repository` (
   `file_id` int(11) NOT NULL COMMENT 'References files.file_id',
   `extracted_text` text DEFAULT NULL COMMENT 'Extracted text content from file'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Dumping data for table `text_repository`
+--
+
+INSERT INTO `text_repository` (`content_id`, `file_id`, `extracted_text`) VALUES
+(106, 111, NULL);
 
 -- --------------------------------------------------------
 
@@ -218,7 +227,9 @@ INSERT INTO `transactions` (`transaction_id`, `user_id`, `users_department_id`, 
 (136, NULL, NULL, NULL, 'login', 'failed', '2025-08-13 12:27:21', 'Invalid login attempt for username: Sgt Caleb Steven A Lagunilla PA (Res)'),
 (137, 14, NULL, NULL, 'login', 'completed', '2025-08-13 12:27:35', 'User logged in successfully'),
 (138, NULL, NULL, NULL, 'login', 'failed', '2025-08-13 13:25:58', 'Invalid login attempt for username: Sgt Caleb Steven A Lagunilla PA (Res)'),
-(139, 14, NULL, NULL, 'login', 'completed', '2025-08-13 13:26:04', 'User logged in successfully');
+(139, 14, NULL, NULL, 'login', 'completed', '2025-08-13 13:26:04', 'User logged in successfully'),
+(140, 14, NULL, NULL, 'login_success', '', '2025-08-15 13:09:30', 'User logged in successfully'),
+(141, 14, NULL, 111, 'file_upload', '', '2025-08-15 13:12:45', 'Uploaded 484c2f5a-9131-4c51-a7a2-3ce814670c20.pdf');
 
 -- --------------------------------------------------------
 
@@ -321,16 +332,15 @@ ALTER TABLE `files`
 --
 ALTER TABLE `text_repository`
   ADD PRIMARY KEY (`content_id`),
-  ADD KEY `idx_file_id` (`file_id`),
-  ADD FULLTEXT KEY `idx_extracted_text` (`extracted_text`);
+  ADD KEY `idx_file_id` (`file_id`);
+ALTER TABLE `text_repository` ADD FULLTEXT KEY `idx_extracted_text` (`extracted_text`);
 
 --
 -- Indexes for table `transactions`
 --
-CREATE INDEX `idx_user_type_time` ON `transactions` (`user_id`, `transaction_type`, `transaction_time`);
-
 ALTER TABLE `transactions`
   ADD PRIMARY KEY (`transaction_id`),
+  ADD KEY `idx_user_type_time` (`user_id`,`transaction_type`,`transaction_time`),
   ADD KEY `idx_user_id` (`user_id`),
   ADD KEY `idx_users_department_id` (`users_department_id`),
   ADD KEY `idx_file_id` (`file_id`),
@@ -350,7 +360,7 @@ ALTER TABLE `users`
 --
 ALTER TABLE `users_department`
   ADD PRIMARY KEY (`users_department_id`),
-  ADD UNIQUE KEY `idx_user_department` (`user_id`, `department_id`),
+  ADD UNIQUE KEY `idx_user_department` (`user_id`,`department_id`),
   ADD KEY `idx_department_id` (`department_id`);
 
 --
@@ -373,19 +383,19 @@ ALTER TABLE `document_types`
 -- AUTO_INCREMENT for table `files`
 --
 ALTER TABLE `files`
-  MODIFY `file_id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=111;
+  MODIFY `file_id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
 -- AUTO_INCREMENT for table `text_repository`
 --
 ALTER TABLE `text_repository`
-  MODIFY `content_id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=106;
+  MODIFY `content_id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=107;
 
 --
 -- AUTO_INCREMENT for table `transactions`
 --
 ALTER TABLE `transactions`
-  MODIFY `transaction_id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=140;
+  MODIFY `transaction_id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=142;
 
 --
 -- AUTO_INCREMENT for table `users`
@@ -415,8 +425,7 @@ ALTER TABLE `departments`
 ALTER TABLE `files`
   ADD CONSTRAINT `fk_files_document_type` FOREIGN KEY (`document_type_id`) REFERENCES `document_types` (`document_type_id`) ON DELETE SET NULL,
   ADD CONSTRAINT `fk_files_parent` FOREIGN KEY (`parent_file_id`) REFERENCES `files` (`file_id`) ON DELETE SET NULL ON UPDATE CASCADE,
-  ADD CONSTRAINT `fk_files_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`) ON DELETE CASCADE,
-  ADD CONSTRAINT `chk_physical_storage_path` CHECK (`physical_storage_path` REGEXP '^[A-Z][0-9]+(/[A-Z][0-9]+){3}$');
+  ADD CONSTRAINT `fk_files_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`) ON DELETE CASCADE;
 
 --
 -- Constraints for table `text_repository`
@@ -438,7 +447,6 @@ ALTER TABLE `transactions`
 ALTER TABLE `users_department`
   ADD CONSTRAINT `fk_users_department_department` FOREIGN KEY (`department_id`) REFERENCES `departments` (`department_id`) ON DELETE CASCADE,
   ADD CONSTRAINT `fk_users_department_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`) ON DELETE CASCADE;
-
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
