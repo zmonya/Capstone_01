@@ -54,7 +54,7 @@ function logTransaction(PDO $pdo, int $userId, string $status, int $type, string
 {
     $stmt = executeQuery(
         $pdo,
-        "INSERT INTO transaction (User_id, Transaction_status, Transaction_type, Time, Massage) VALUES (?, ?, ?, NOW(), ?)",
+        "INSERT INTO transactions (user_id, transaction_status, transaction_type, transaction_time, description) VALUES (?, ?, ?, NOW(), ?)",
         [$userId, $status, $type, $message]
     );
     return $stmt !== false;
@@ -74,32 +74,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && validate
 
         if (empty($name)) {
             $error = 'Document type name is required.';
-            logTransaction($pdo, $userId, 'Failure', $action === 'add_document_type' ? 16 : 17, $error);
+            logTransaction($pdo, $userId, 'failed', $action === 'add_document_type' ? 16 : 17, $error);
             $response = ['success' => false, 'message' => $error];
         } else {
             // Check for duplicate name
             $checkStmt = executeQuery(
                 $pdo,
-                "SELECT id FROM document_types WHERE name = ? AND id != ?",
+                "SELECT document_type_id FROM document_types WHERE type_name = ? AND document_type_id != ?",
                 [$name, $id ?? 0]
             );
             if ($checkStmt && $checkStmt->rowCount() > 0) {
                 $error = 'Document type name already exists.';
-                logTransaction($pdo, $userId, 'Failure', $action === 'add_document_type' ? 16 : 17, $error);
+                logTransaction($pdo, $userId, 'failed', $action === 'add_document_type' ? 16 : 17, $error);
                 $response = ['success' => false, 'message' => $error];
             } else {
                 if ($action === 'add_document_type') {
                     $stmt = executeQuery(
                         $pdo,
-                        "INSERT INTO document_types (name) VALUES (?)",
-                        [$name]
+                        "INSERT INTO document_types (type_name, field_name, field_label, field_type, is_required) VALUES (?, ?, ?, ?, ?)",
+                        [$name, 'default_field', 'Default Field', 'text', 1]
                     );
                     $message = "Added document type: $name";
                     $transType = 16;
                 } elseif ($action === 'edit_document_type' && $id) {
                     $stmt = executeQuery(
                         $pdo,
-                        "UPDATE document_types SET name = ? WHERE id = ?",
+                        "UPDATE document_types SET type_name = ? WHERE document_type_id = ?",
                         [$name, $id]
                     );
                     $message = "Updated document type: $name";
@@ -108,11 +108,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && validate
 
                 if ($stmt) {
                     $success = $message;
-                    logTransaction($pdo, $userId, 'Success', $transType, $message);
+                    logTransaction($pdo, $userId, 'completed', $transType, $message);
                     $response = ['success' => true, 'message' => $success];
                 } else {
                     $error = 'Failed to ' . ($action === 'add_document_type' ? 'add' : 'update') . ' document type.';
-                    logTransaction($pdo, $userId, 'Failure', $transType, $error);
+                    logTransaction($pdo, $userId, 'failed', $transType, $error);
                     $response = ['success' => false, 'message' => $error];
                 }
             }
@@ -125,33 +125,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && validate
         $field_type = filter_input(INPUT_POST, 'field_type', FILTER_SANITIZE_FULL_SPECIAL_CHARS);
         $is_required = filter_var($_POST['is_required'], FILTER_VALIDATE_INT, ['options' => ['default' => 0, 'min_range' => 0, 'max_range' => 1]]);
 
-        if (!$document_type_id || empty($field_name) || empty($field_label) || !in_array($field_type, ['text', 'textarea', 'date'])) {
+        if (!$document_type_id || empty($field_name) || empty($field_label) || !in_array($field_type, ['text', 'number', 'date', 'file'])) {
             $error = 'All field inputs must be valid.';
-            logTransaction($pdo, $userId, 'Failure', $action === 'add_field' ? 18 : 19, $error);
+            logTransaction($pdo, $userId, 'failed', $action === 'add_field' ? 18 : 19, $error);
             $response = ['success' => false, 'message' => $error];
         } else {
             // Validate document type
-            $docTypeStmt = executeQuery($pdo, "SELECT id FROM document_types WHERE id = ?", [$document_type_id]);
+            $docTypeStmt = executeQuery($pdo, "SELECT document_type_id FROM document_types WHERE document_type_id = ?", [$document_type_id]);
             if (!$docTypeStmt || $docTypeStmt->rowCount() === 0) {
                 $error = 'Invalid document type selected.';
-                logTransaction($pdo, $userId, 'Failure', $action === 'add_field' ? 18 : 19, $error);
+                logTransaction($pdo, $userId, 'failed', $action === 'add_field' ? 18 : 19, $error);
                 $response = ['success' => false, 'message' => $error];
             } else {
                 // Check for duplicate field name
                 $checkStmt = executeQuery(
                     $pdo,
-                    "SELECT id FROM documents_type_fields WHERE field_name = ? AND document_type_id = ? AND id != ?",
+                    "SELECT document_type_id FROM document_types WHERE field_name = ? AND document_type_id = ? AND document_type_id != ?",
                     [$field_name, $document_type_id, $field_id ?? 0]
                 );
                 if ($checkStmt && $checkStmt->rowCount() > 0) {
                     $error = 'Field name already exists for this document type.';
-                    logTransaction($pdo, $userId, 'Failure', $action === 'add_field' ? 18 : 19, $error);
+                    logTransaction($pdo, $userId, 'failed', $action === 'add_field' ? 18 : 19, $error);
                     $response = ['success' => false, 'message' => $error];
                 } else {
                     if ($action === 'add_field') {
                         $stmt = executeQuery(
                             $pdo,
-                            "INSERT INTO documents_type_fields (document_type_id, field_name, field_label, field_type, is_required) VALUES (?, ?, ?, ?, ?)",
+                            "INSERT INTO document_types (type_name, field_name, field_label, field_type, is_required) VALUES ((SELECT type_name FROM document_types WHERE document_type_id = ?), ?, ?, ?, ?)",
                             [$document_type_id, $field_name, $field_label, $field_type, $is_required]
                         );
                         $message = "Added field: $field_label to document type ID: $document_type_id";
@@ -159,8 +159,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && validate
                     } elseif ($action === 'edit_field' && $field_id) {
                         $stmt = executeQuery(
                             $pdo,
-                            "UPDATE documents_type_fields SET field_name = ?, field_label = ?, field_type = ?, is_required = ? WHERE id = ? AND document_type_id = ?",
-                            [$field_name, $field_label, $field_type, $is_required, $field_id, $document_type_id]
+                            "UPDATE document_types SET field_name = ?, field_label = ?, field_type = ?, is_required = ? WHERE document_type_id = ?",
+                            [$field_name, $field_label, $field_type, $is_required, $field_id]
                         );
                         $message = "Updated field: $field_label for document type ID: $document_type_id";
                         $transType = 19;
@@ -168,11 +168,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && validate
 
                     if ($stmt) {
                         $success = $message;
-                        logTransaction($pdo, $userId, 'Success', $transType, $message);
+                        logTransaction($pdo, $userId, 'completed', $transType, $message);
                         $response = ['success' => true, 'message' => $success];
                     } else {
                         $error = 'Failed to ' . ($action === 'add_field' ? 'add' : 'update') . ' field.';
-                        logTransaction($pdo, $userId, 'Failure', $transType, $error);
+                        logTransaction($pdo, $userId, 'failed', $transType, $error);
                         $response = ['success' => false, 'message' => $error];
                     }
                 }
@@ -184,21 +184,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && validate
 
         if (!$field_id || !$document_type_id) {
             $error = 'Invalid field or document type ID.';
-            logTransaction($pdo, $userId, 'Failure', 20, $error);
+            logTransaction($pdo, $userId, 'failed', 20, $error);
             $response = ['success' => false, 'message' => $error];
         } else {
             $stmt = executeQuery(
                 $pdo,
-                "DELETE FROM documents_type_fields WHERE id = ? AND document_type_id = ?",
-                [$field_id, $document_type_id]
+                "DELETE FROM document_types WHERE document_type_id = ?",
+                [$field_id]
             );
             if ($stmt) {
                 $message = "Deleted field ID: $field_id from document type ID: $document_type_id";
-                logTransaction($pdo, $userId, 'Success', 20, $message);
+                logTransaction($pdo, $userId, 'completed', 20, $message);
                 $response = ['success' => true, 'message' => $message];
             } else {
                 $error = 'Failed to delete field.';
-                logTransaction($pdo, $userId, 'Failure', 20, $error);
+                logTransaction($pdo, $userId, 'failed', 20, $error);
                 $response = ['success' => false, 'message' => $error];
             }
         }
@@ -206,32 +206,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && validate
         $id = filter_var($_POST['id'], FILTER_VALIDATE_INT);
         if (!$id) {
             $error = 'Invalid document type ID.';
-            logTransaction($pdo, $userId, 'Failure', 21, $error);
+            logTransaction($pdo, $userId, 'failed', 21, $error);
             $response = ['success' => false, 'message' => $error];
         } else {
             // Check if document type is used in files
-            $checkStmt = executeQuery($pdo, "SELECT File_id FROM files WHERE Document_type_id = ?", [$id]);
+            $checkStmt = executeQuery($pdo, "SELECT file_id FROM files WHERE document_type_id = ?", [$id]);
             if ($checkStmt && $checkStmt->rowCount() > 0) {
                 $error = 'Cannot delete document type with associated files.';
-                logTransaction($pdo, $userId, 'Failure', 21, $error);
+                logTransaction($pdo, $userId, 'failed', 21, $error);
                 $response = ['success' => false, 'message' => $error];
             } else {
-                // Delete fields first
-                $fieldStmt = executeQuery($pdo, "DELETE FROM documents_type_fields WHERE document_type_id = ?", [$id]);
-                if ($fieldStmt) {
-                    $stmt = executeQuery($pdo, "DELETE FROM document_types WHERE id = ?", [$id]);
-                    if ($stmt) {
-                        $message = "Deleted document type ID: $id";
-                        logTransaction($pdo, $userId, 'Success', 21, $message);
-                        $response = ['success' => true, 'message' => $message];
-                    } else {
-                        $error = 'Failed to delete document type.';
-                        logTransaction($pdo, $userId, 'Failure', 21, $error);
-                        $response = ['success' => false, 'message' => $error];
-                    }
+                $stmt = executeQuery($pdo, "DELETE FROM document_types WHERE document_type_id = ?", [$id]);
+                if ($stmt) {
+                    $message = "Deleted document type ID: $id";
+                    logTransaction($pdo, $userId, 'completed', 21, $message);
+                    $response = ['success' => true, 'message' => $message];
                 } else {
-                    $error = 'Failed to delete associated fields.';
-                    logTransaction($pdo, $userId, 'Failure', 21, $error);
+                    $error = 'Failed to delete document type.';
+                    logTransaction($pdo, $userId, 'failed', 21, $error);
                     $response = ['success' => false, 'message' => $error];
                 }
             }
@@ -246,7 +238,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && validate
 }
 
 // Fetch all document types
-$documentTypesStmt = executeQuery($pdo, "SELECT id, name FROM document_types ORDER BY name ASC");
+$documentTypesStmt = executeQuery($pdo, "SELECT DISTINCT type_name, MIN(document_type_id) as id FROM document_types GROUP BY type_name ORDER BY type_name ASC");
 $documentTypes = $documentTypesStmt ? $documentTypesStmt->fetchAll(PDO::FETCH_ASSOC) : [];
 
 ?>
@@ -254,40 +246,18 @@ $documentTypes = $documentTypesStmt ? $documentTypesStmt->fetchAll(PDO::FETCH_AS
 <!DOCTYPE html>
 <html lang="en">
 
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+<head>    
     <title>Document Type Management - Arc-Hive</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css" integrity="sha512-Kc323vGBEqzTmouAECnVceyQqyqdsSiqLQISBL29aUW4U/M7pSPA/gEUZQqv1cwx4OnYxTxve5UMg5GT6L4JJg==" crossorigin="anonymous">
-    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/notyf@3/notyf.min.css">
-    <link rel="stylesheet" href="styles.css">
-    <link rel="stylesheet" href="admin-sidebar.css">
-    <link rel="stylesheet" href="admin-interface.css">
-    <script src="https://code.jquery.com/jquery-3.7.1.min.js" integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo=" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/notyf@3/notyf.min.js"></script>
+    <?php
+        include 'admin_head.php';
+    ?>
+
+
+
+
+
     <style>
-        body.document-type-management {
-            font-family: 'Montserrat', sans-serif;
-            background: linear-gradient(135deg, #e0e7ff, #f4f4f9);
-            color: #34495e;
-        }
 
-        .main-content.document-type-management {
-            padding: 25px;
-            max-width: 1400px;
-            margin: 0 auto;
-        }
-
-        h2 {
-            font-size: 26px;
-            color: #2c3e50;
-            margin: 0 0 20px;
-            padding-bottom: 6px;
-            border-bottom: 2px solid #50c878;
-            text-align: left;
-        }
 
         .open-modal-btn {
             background: linear-gradient(45deg, #50c878, #2ecc71);
@@ -457,7 +427,7 @@ $documentTypes = $documentTypesStmt ? $documentTypesStmt->fetchAll(PDO::FETCH_AS
             }
         }
 
-        .modal-content h2 {
+        .modal-content {
             font-size: 24px;
             color: #2c3e50;
             margin-bottom: 15px;
@@ -525,18 +495,9 @@ $documentTypes = $documentTypesStmt ? $documentTypesStmt->fetchAll(PDO::FETCH_AS
 
 <body class="document-type-management">
     <!-- Admin Sidebar -->
-    <div class="sidebar">
-        <button class="toggle-btn" title="Toggle Sidebar"><i class="fas fa-bars"></i></button>
-        <h2 class="sidebar-title">Admin Panel</h2>
-        <a href="dashboard.php" class="client-btn"><i class="fas fa-exchange-alt"></i><span class="link-text">Switch to Client View</span></a>
-        <a href="admin_dashboard.php"><i class="fas fa-home"></i><span class="link-text">Dashboard</span></a>
-        <a href="admin_search.php"><i class="fas fa-search"></i><span class="link-text">View All Files</span></a>
-        <a href="user_management.php"><i class="fas fa-users"></i><span class="link-text">User Management</span></a>
-        <a href="department_management.php"><i class="fas fa-building"></i><span class="link-text">Department Management</span></a>
-        <a href="physical_storage_management.php"><i class="fas fa-archive"></i><span class="link-text">Physical Storage</span></a>
-        <a href="document_type_management.php" class="active"><i class="fas fa-file-alt"></i><span class="link-text">Document Type Management</span></a>
-        <a href="logout.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i><span class="link-text">Logout</span></a>
-    </div>
+    <?php
+        include 'admin_menu.php';
+    ?>
 
     <!-- Main Content -->
     <div class="main-content document-type-management">
@@ -560,7 +521,7 @@ $documentTypes = $documentTypesStmt ? $documentTypesStmt->fetchAll(PDO::FETCH_AS
                     <div class="document-card" data-id="<?php echo htmlspecialchars((string)$type['id'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>" onclick="toggleFields(<?php echo htmlspecialchars((string)$type['id'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>)">
                         <h3>
                             <i class="fas fa-chevron-down"></i>
-                            <?php echo htmlspecialchars($type['name'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
+                            <?php echo htmlspecialchars($type['type_name'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
                             <div class="action-buttons" style="margin-left: auto;">
                                 <button class="edit-btn" onclick="openModal('edit', <?php echo htmlspecialchars((string)$type['id'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>, event)"><i class="fas fa-edit"></i></button>
                                 <button class="delete-btn" onclick="deleteDocumentType(<?php echo htmlspecialchars((string)$type['id'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>, event)"><i class="fas fa-trash"></i></button>
@@ -619,8 +580,9 @@ $documentTypes = $documentTypesStmt ? $documentTypesStmt->fetchAll(PDO::FETCH_AS
                     <input type="text" id="fieldLabel" name="field_label" placeholder="e.g., Subject" required>
                     <select name="field_type" id="fieldType">
                         <option value="text">Text</option>
-                        <option value="textarea">Textarea</option>
+                        <option value="number">Number</option>
                         <option value="date">Date</option>
+                        <option value="file">File</option>
                     </select>
                     <label><input type="checkbox" id="fieldRequired" name="is_required" value="1" checked> Required</label>
                     <button type="submit"><i class="fas fa-save"></i> Save</button>
@@ -917,7 +879,7 @@ $documentTypes = $documentTypesStmt ? $documentTypesStmt->fetchAll(PDO::FETCH_AS
             if ($action === 'get_document_type') {
                 $id = filter_var($_GET['id'], FILTER_VALIDATE_INT);
                 if ($id) {
-                    $stmt = executeQuery($pdo, "SELECT id, name FROM document_types WHERE id = ?", [$id]);
+                    $stmt = executeQuery($pdo, "SELECT document_type_id as id, type_name as name FROM document_types WHERE document_type_id = ?", [$id]);
                     if ($stmt && $data = $stmt->fetch(PDO::FETCH_ASSOC)) {
                         $response = ['success' => true, 'document_type' => $data];
                     } else {
@@ -929,7 +891,7 @@ $documentTypes = $documentTypesStmt ? $documentTypesStmt->fetchAll(PDO::FETCH_AS
             } elseif ($action === 'get_field') {
                 $id = filter_var($_GET['id'], FILTER_VALIDATE_INT);
                 if ($id) {
-                    $stmt = executeQuery($pdo, "SELECT id, document_type_id, field_name, field_label, field_type, is_required FROM documents_type_fields WHERE id = ?", [$id]);
+                    $stmt = executeQuery($pdo, "SELECT document_type_id as id, document_type_id, field_name, field_label, field_type, is_required FROM document_types WHERE document_type_id = ?", [$id]);
                     if ($stmt && $data = $stmt->fetch(PDO::FETCH_ASSOC)) {
                         $response = ['success' => true, 'field' => $data];
                     } else {
@@ -941,7 +903,7 @@ $documentTypes = $documentTypesStmt ? $documentTypesStmt->fetchAll(PDO::FETCH_AS
             } elseif ($action === 'get_fields') {
                 $document_type_id = filter_var($_GET['document_type_id'], FILTER_VALIDATE_INT);
                 if ($document_type_id) {
-                    $stmt = executeQuery($pdo, "SELECT id, field_name, field_label, field_type, is_required FROM documents_type_fields WHERE document_type_id = ? ORDER BY field_name ASC", [$document_type_id]);
+                    $stmt = executeQuery($pdo, "SELECT document_type_id as id, field_name, field_label, field_type, is_required FROM document_types WHERE type_name = (SELECT type_name FROM document_types WHERE document_type_id = ?) ORDER BY field_name ASC", [$document_type_id]);
                     if ($stmt) {
                         $response = ['success' => true, 'fields' => $stmt->fetchAll(PDO::FETCH_ASSOC)];
                     } else {

@@ -13,6 +13,11 @@
     ],
     "require": {
         "dompdf/dompdf": "^3.1",
-        "vlucas/phpdotenv": "^5.6"
+        "vlucas/phpdotenv": "^5.6",
+        "smalot/pdfparser": "^2.12",
+        "phpoffice/phpword": "^1.4",
+        "phpoffice/phpspreadsheet": "^5.0",
+        "predis/predis": "^3.2",
+        "google/cloud-vision": "^2.0"
     }
 }

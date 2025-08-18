@@ -1,6 +1,4 @@
 <?php
-
-declare(strict_types=1);
 session_start();
 require 'db_connection.php';
 
@@ -8,10 +6,9 @@ require 'db_connection.php';
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
 header('X-XSS-Protection: 1; mode=block');
-header('Content-Security-Policy: default-src \'self\'; script-src \'self\' https://code.jquery.com https://cdn.jsdelivr.net; style-src \'self\' https://cdn.jsdelivr.net https://fonts.googleapis.com; font-src https://fonts.gstatic.com;');
 
 // CSRF token generation and validation
-function generateCsrfToken(): string
+function generateCsrfToken()
 {
     if (empty($_SESSION['csrf_token'])) {
         $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
@@ -19,14 +16,20 @@ function generateCsrfToken(): string
     return $_SESSION['csrf_token'];
 }
 
-function validateCsrfToken(string $token): bool
+// Validate CSRF token
+function validateCsrfToken($token)
 {
     return isset($_SESSION['csrf_token']) && hash_equals($_SESSION['csrf_token'], $token);
 }
 
 // Redirect to login if not authenticated or not an admin
-if (!isset($_SESSION['user_id']) || !isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
+if (!isset($_SESSION['user_id']) || !isset($_SESSION['role'])) {
     header('Location: login.php');
+    exit();
+}
+
+if ($_SESSION['role'] !== 'admin') {
+    header('Location: unauthorized.php');
     exit();
 }
 
@@ -38,7 +41,7 @@ if ($userId === false) {
 }
 
 // Function to execute prepared queries safely
-function executeQuery(PDO $pdo, string $query, array $params = []): PDOStatement|false
+function executeQuery($pdo, $query, $params = [])
 {
     try {
         $stmt = $pdo->prepare($query);
@@ -50,594 +53,484 @@ function executeQuery(PDO $pdo, string $query, array $params = []): PDOStatement
     }
 }
 
-// Function to log transactions
-function logTransaction(PDO $pdo, int $userId, string $status, int $type, string $message): bool
+// Function to sanitize HTML output
+function sanitizeHTML($data)
 {
-    $stmt = executeQuery(
-        $pdo,
-        "INSERT INTO transaction (User_id, Transaction_status, Transaction_type, Time, Massage) VALUES (?, ?, ?, NOW(), ?)",
-        [$userId, $status, $type, $message]
-    );
-    return $stmt !== false;
+    return htmlspecialchars($data ?? '', ENT_QUOTES, 'UTF-8');
 }
 
-$error = isset($_SESSION['error']) ? $_SESSION['error'] : "";
-$success = isset($_SESSION['success']) ? $_SESSION['success'] : "";
-unset($_SESSION['error'], $_SESSION['success']); // Clear messages after display
+// Handle form submissions for add/edit/delete departments
+$successMessage = '';
+$errorMessage = '';
 
-// Valid department types and name types
-const VALID_DEPARTMENT_TYPES = ['college', 'office', 'sub_department'];
-const VALID_NAME_TYPES = ['Academic', 'Administrative', 'Program'];
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && validateCsrfToken($_POST['csrf_token'] ?? '')) {
+    $action = $_POST['action'] ?? '';
 
-// Handle form submission for adding/editing departments
-if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['action']) && validateCsrfToken($_POST['csrf_token'] ?? '')) {
-    $action = filter_input(INPUT_POST, 'action', FILTER_SANITIZE_FULL_SPECIAL_CHARS);
+    if ($action === 'add_department') {
+        $name = trim($_POST['department_name'] ?? '');
+        $type = trim($_POST['department_type'] ?? '');
+        $nameType = trim($_POST['name_type'] ?? '');
+        $parentId = !empty($_POST['parent_department_id']) ? (int)$_POST['parent_department_id'] : null;
 
-    if ($action === 'add_dept' || $action === 'edit_dept') {
-        $department_id = isset($_POST['department_id']) ? filter_var($_POST['department_id'], FILTER_VALIDATE_INT) : null;
-        $name = trim(filter_input(INPUT_POST, 'name', FILTER_SANITIZE_FULL_SPECIAL_CHARS));
-        $type = trim(filter_input(INPUT_POST, 'type', FILTER_SANITIZE_FULL_SPECIAL_CHARS));
-        $name_type = ($type === 'college') ? 'Academic' : 'Administrative';
-
-        if (empty($name) || empty($type) || !in_array($type, ['college', 'office'])) {
-            $error = "Department name and valid type (college or office) are required.";
-            logTransaction($pdo, $userId, 'Failure', 8, $error);
-        } elseif (!in_array($name_type, VALID_NAME_TYPES)) {
-            $error = "Invalid name type for department.";
-            logTransaction($pdo, $userId, 'Failure', 8, $error);
-        } else {
-            // Check for duplicate department name
-            $checkStmt = executeQuery(
-                $pdo,
-                "SELECT Department_id FROM departments WHERE Department_name = ? AND Department_id != ? AND Department_type IN ('college', 'office')",
-                [$name, $department_id ?? 0]
-            );
-            if ($checkStmt && $checkStmt->rowCount() > 0) {
-                $error = "Department name already exists.";
-                logTransaction($pdo, $userId, 'Failure', 8, $error);
+        if (!empty($name) && !empty($type) && !empty($nameType)) {
+            $insertStmt = executeQuery($pdo, "INSERT INTO departments (department_name, department_type, name_type, parent_department_id) VALUES (?, ?, ?, ?)", [$name, $type, $nameType, $parentId]);
+            if ($insertStmt) {
+                $successMessage = 'Department added successfully.';
+                // Log transaction
+                executeQuery($pdo, "INSERT INTO transactions (user_id, transaction_type, transaction_status, transaction_time, description) VALUES (?, 'add_department', 'completed', NOW(), ?)", [$userId, "Added department: $name"]);
             } else {
-                if ($action === 'add_dept') {
-                    $stmt = executeQuery(
-                        $pdo,
-                        "INSERT INTO departments (Department_name, Department_type, Name_type, Parent_department_id) VALUES (?, ?, ?, NULL)",
-                        [$name, $type, $name_type]
-                    );
-                    $message = "Added department: $name";
-                    $transType = 8;
-                } elseif ($action === 'edit_dept' && $department_id) {
-                    $stmt = executeQuery(
-                        $pdo,
-                        "UPDATE departments SET Department_name = ?, Department_type = ?, Name_type = ? WHERE Department_id = ? AND Department_type IN ('college', 'office')",
-                        [$name, $type, $name_type, $department_id]
-                    );
-                    $message = "Updated department: $name";
-                    $transType = 9;
-                }
+                $errorMessage = 'Failed to add department.';
+            }
+        } else {
+            $errorMessage = 'All fields are required.';
+        }
+    } elseif ($action === 'edit_department') {
+        $id = (int)($_POST['department_id'] ?? 0);
+        $name = trim($_POST['department_name'] ?? '');
+        $type = trim($_POST['department_type'] ?? '');
+        $nameType = trim($_POST['name_type'] ?? '');
+        $parentId = !empty($_POST['parent_department_id']) ? (int)$_POST['parent_department_id'] : null;
 
-                if ($stmt) {
-                    $_SESSION['success'] = $message;
-                    logTransaction($pdo, $userId, 'Success', $transType, $message);
-                    header("Location: department_management.php");
-                    exit();
+        if ($id > 0 && !empty($name) && !empty($type) && !empty($nameType)) {
+            $updateStmt = executeQuery($pdo, "UPDATE departments SET department_name = ?, department_type = ?, name_type = ?, parent_department_id = ? WHERE department_id = ?", [$name, $type, $nameType, $parentId, $id]);
+            if ($updateStmt) {
+                $successMessage = 'Department updated successfully.';
+                // Log transaction
+                executeQuery($pdo, "INSERT INTO transactions (user_id, transaction_type, transaction_status, transaction_time, description) VALUES (?, 'edit_department', 'completed', NOW(), ?)", [$userId, "Edited department ID: $id"]);
+            } else {
+                $errorMessage = 'Failed to update department.';
+            }
+        } else {
+            $errorMessage = 'Invalid data for update.';
+        }
+    } elseif ($action === 'delete_department') {
+        $id = (int)($_POST['department_id'] ?? 0);
+        if ($id > 0) {
+            // Check for children or dependencies (e.g., users_department)
+            $childrenStmt = executeQuery($pdo, "SELECT COUNT(*) FROM departments WHERE parent_department_id = ?", [$id]);
+            $childrenCount = $childrenStmt ? $childrenStmt->fetchColumn() : 0;
+
+            $usersStmt = executeQuery($pdo, "SELECT COUNT(*) FROM users_department WHERE department_id = ?", [$id]);
+            $usersCount = $usersStmt ? $usersStmt->fetchColumn() : 0;
+
+            if ($childrenCount === 0 && $usersCount === 0) {
+                $deleteStmt = executeQuery($pdo, "DELETE FROM departments WHERE department_id = ?", [$id]);
+                if ($deleteStmt) {
+                    $successMessage = 'Department deleted successfully.';
+                    // Log transaction
+                    executeQuery($pdo, "INSERT INTO transactions (user_id, transaction_type, transaction_status, transaction_time, description) VALUES (?, 'delete_department', 'completed', NOW(), ?)", [$userId, "Deleted department ID: $id"]);
                 } else {
-                    $error = "Failed to " . ($action === 'add_dept' ? "add" : "update") . " department.";
-                    logTransaction($pdo, $userId, 'Failure', $transType, $error);
+                    $errorMessage = 'Failed to delete department.';
                 }
-            }
-        }
-    } elseif ($action === 'add_subdept') {
-        $name = trim(filter_input(INPUT_POST, 'name', FILTER_SANITIZE_FULL_SPECIAL_CHARS));
-        $parent_dept_id = filter_var($_POST['parent_dept_id'], FILTER_VALIDATE_INT);
-        $name_type = 'Program';
-
-        if (empty($name) || !$parent_dept_id) {
-            $error = "Subdepartment name and parent department are required.";
-            logTransaction($pdo, $userId, 'Failure', 10, $error);
-        } elseif (!in_array($name_type, VALID_NAME_TYPES)) {
-            $error = "Invalid name type for subdepartment.";
-            logTransaction($pdo, $userId, 'Failure', 10, $error);
-        } else {
-            // Validate parent department
-            $parentStmt = executeQuery(
-                $pdo,
-                "SELECT Department_id FROM departments WHERE Department_id = ? AND Department_type IN ('college', 'office')",
-                [$parent_dept_id]
-            );
-            if (!$parentStmt || $parentStmt->rowCount() === 0) {
-                $error = "Invalid parent department selected.";
-                logTransaction($pdo, $userId, 'Failure', 10, $error);
             } else {
-                // Check for duplicate subdepartment name within parent
-                $checkStmt = executeQuery(
-                    $pdo,
-                    "SELECT Department_id FROM departments WHERE Department_name = ? AND Parent_department_id = ? AND Department_type = 'sub_department'",
-                    [$name, $parent_dept_id]
-                );
-                if ($checkStmt && $checkStmt->rowCount() > 0) {
-                    $error = "Subdepartment name already exists under this parent department.";
-                    logTransaction($pdo, $userId, 'Failure', 10, $error);
-                } else {
-                    $stmt = executeQuery(
-                        $pdo,
-                        "INSERT INTO departments (Department_name, Department_type, Name_type, Parent_department_id) VALUES (?, 'sub_department', ?, ?)",
-                        [$name, $name_type, $parent_dept_id]
-                    );
-                    if ($stmt) {
-                        $_SESSION['success'] = "Added subdepartment: $name under parent ID: $parent_dept_id";
-                        logTransaction($pdo, $userId, 'Success', 10, $_SESSION['success']);
-                        header("Location: department_management.php");
-                        exit();
-                    } else {
-                        $error = "Failed to add subdepartment.";
-                        logTransaction($pdo, $userId, 'Failure', 10, $error);
-                    }
-                }
+                $errorMessage = 'Cannot delete department with children or assigned users.';
             }
-        }
-    }
-    $_SESSION['error'] = $error; // Store error for display after redirect
-}
-
-// Handle department deletion
-if (isset($_GET['delete_dept']) && validateCsrfToken($_GET['csrf_token'] ?? '')) {
-    $department_id = filter_var($_GET['delete_dept'], FILTER_VALIDATE_INT);
-    if ($department_id) {
-        // Check if department has subdepartments or users
-        $checkSubStmt = executeQuery(
-            $pdo,
-            "SELECT Department_id FROM departments WHERE Parent_department_id = ?",
-            [$department_id]
-        );
-        $checkUsersStmt = executeQuery(
-            $pdo,
-            "SELECT Users_Department_id FROM users_department WHERE Department_id = ?",
-            [$department_id]
-        );
-
-        if ($checkSubStmt && $checkSubStmt->rowCount() > 0) {
-            $_SESSION['error'] = "Cannot delete department with subdepartments.";
-            logTransaction($pdo, $userId, 'Failure', 11, $_SESSION['error']);
-        } elseif ($checkUsersStmt && $checkUsersStmt->rowCount() > 0) {
-            $_SESSION['error'] = "Cannot delete department with assigned users.";
-            logTransaction($pdo, $userId, 'Failure', 11, $_SESSION['error']);
         } else {
-            $stmt = executeQuery(
-                $pdo,
-                "DELETE FROM departments WHERE Department_id = ?",
-                [$department_id]
-            );
-            if ($stmt) {
-                $_SESSION['success'] = "Deleted department ID: $department_id";
-                logTransaction($pdo, $userId, 'Success', 11, $_SESSION['success']);
-            } else {
-                $_SESSION['error'] = "Failed to delete department.";
-                logTransaction($pdo, $userId, 'Failure', 11, $_SESSION['error']);
-            }
+            $errorMessage = 'Invalid department ID.';
         }
-        header("Location: department_management.php");
-        exit();
-    } else {
-        $_SESSION['error'] = "Invalid department ID.";
-        logTransaction($pdo, $userId, 'Failure', 11, $_SESSION['error']);
     }
 }
 
-// Fetch all parent departments
-$departmentsStmt = executeQuery(
-    $pdo,
-    "SELECT Department_id, Department_name, Department_type, Name_type FROM departments WHERE Department_type IN ('college', 'office') AND Parent_department_id IS NULL ORDER BY Department_name ASC"
-);
+// Fetch all departments with hierarchy
+$departmentsStmt = executeQuery($pdo, "
+    SELECT d.department_id, d.department_name, d.department_type, d.name_type, d.parent_department_id, 
+           COALESCE(p.department_name, 'None') AS parent_name
+    FROM departments d
+    LEFT JOIN departments p ON d.parent_department_id = p.department_id
+    ORDER BY d.department_id ASC");
 $departments = $departmentsStmt ? $departmentsStmt->fetchAll(PDO::FETCH_ASSOC) : [];
 
-// Fetch all subdepartments with parent department names
-$subdepartmentsStmt = executeQuery(
-    $pdo,
-    "SELECT d1.Department_id, d1.Department_name AS subdepartment_name, d1.Parent_department_id, d1.Name_type, d2.Department_name AS parent_dept_name
-     FROM departments d1
-     LEFT JOIN departments d2 ON d1.Parent_department_id = d2.Department_id
-     WHERE d1.Department_type = 'sub_department'
-     ORDER BY d2.Department_name, d1.Department_name ASC"
-);
-$subdepartments = $subdepartmentsStmt ? $subdepartmentsStmt->fetchAll(PDO::FETCH_ASSOC) : [];
+// Fetch parent departments for select options (top-level only, to avoid cycles)
+$parentDepartmentsStmt = executeQuery($pdo, "SELECT department_id, department_name FROM departments WHERE parent_department_id IS NULL ORDER BY department_name ASC");
+$parentDepartments = $parentDepartmentsStmt ? $parentDepartmentsStmt->fetchAll(PDO::FETCH_ASSOC) : [];
 
+$csrfToken = generateCsrfToken();
+
+// Pagination and table display settings
+$itemsPerPage = isset($_GET['items_per_page']) ? (int)$_GET['items_per_page'] : 5;
+if (!in_array($itemsPerPage, [5, 10, 20, -1])) {
+    $itemsPerPage = 5;
+}
+$currentPage = isset($_GET['page']) ? (int)$_GET['page'] : 1;
+$currentPage = max(1, $currentPage); // Ensure page is at least 1
+$offset = ($currentPage - 1) * $itemsPerPage;
+
+$totalItemsStmt = executeQuery($pdo, "SELECT COUNT(*) FROM departments");
+$totalItems = $totalItemsStmt ? $totalItemsStmt->fetchColumn() : 0;
+
+$paginatedDepartments = $departments;
+if ($itemsPerPage !== -1) {
+    $paginatedDepartments = array_slice($departments, $offset, $itemsPerPage);
+}
+$totalPages = $itemsPerPage === -1 ? 1 : max(1, ceil($totalItems / $itemsPerPage));
 ?>
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <title>Department Management - Arc-Hive</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css" integrity="sha512-Kc323vGBEqzTmouAECnVceyQqyqdsSiqLQISBL29aUW4U/M7pSPA/gEUZQqv1cwx4OnYxTxve5UMg5GT6L4JJg==" crossorigin="anonymous">
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+    <meta http-equiv="X-Frame-Options" content="DENY">
+    <meta http-equiv="X-XSS-Protection" content="1; mode=block">
+    <title>Department Management - ArcHive</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" integrity="sha512-z3gLpd7yknf1YoNbCzqRKc4qyor8gaKU1qmn+CShxbuBusANI9QpRohGBreCFkKxLhei6S9CQXFEbbKuqLg0DA==" crossorigin="anonymous" referrerpolicy="no-referrer">
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/notyf@3/notyf.min.css">
-    <link rel="stylesheet" href="admin-sidebar.css">
-    <link rel="stylesheet" href="style/department_management.css">
-    <script src="https://code.jquery.com/jquery-3.7.1.min.js" integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo=" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/notyf@3/notyf.min.js"></script>
+    <link rel="stylesheet" href="style/admin-interface.css">
+    <link rel="stylesheet" href="style/admin-sidebar.css">
+    <style>
+/*         body {
+            margin: 0;
+            font-family: 'Montserrat', sans-serif;
+            display: flex;
+            height: 100vh;
+            overflow: hidden; 
+        }
+        .sidebar {
+            position: fixed; 
+            top: 0;
+            left: 0;
+            height: 100%;
+            width: 250px; 
+            transition: width 0.3s ease;
+            z-index: 1000;
+        }
+        .sidebar.minimized {
+            width: 60px;
+        } */
+        .main-content {
+            margin-left: 290px; /* Align with expanded sidebar */
+            padding: 20px;
+            flex: 1; /* Take remaining space */
+            overflow-y: auto; /* Allow scrolling in main content */
+            transition: margin-left 0.3s ease;
+        }
+        .main-content.sidebar-minimized {
+            margin-left: 60px; /* Align with minimized sidebar */
+        }
+        .error, .success {
+            font-weight: bold;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            width: fit-content;
+        }
+        .error {
+            color: #dc3545;
+            background-color: #f8d7da;
+        }
+        .success {
+            color: #28a745;
+            background-color: #d4edda;
+            animation: fadeOut 5s forwards;
+        }
+        @keyframes fadeOut {
+            0% { opacity: 1; }
+            80% { opacity: 1; }
+            100% { opacity: 0; display: none; }
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-content {
+            background-color: #fff;
+            padding: 20px;
+            width: 90%;
+            max-width: 500px;
+            border-radius: 8px;
+            position: relative;
+        }
+        .modal-content h3 {
+            margin-top: 0;
+        }
+        .close {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            font-size: 1.5em;
+            cursor: pointer;
+        }
+        .table-container {
+            position: relative;
+        }
+        .department-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        .department-table th, .department-table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        .department-table th {
+            background-color: #3d3d3dff;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        .action-buttons button {
+            margin-right: 5px;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            border: none;
+        }
+        .edit-btn {
+            background-color: #007bff;
+            color: white;
+        }
+        .delete-btn {
+            background-color: #dc3545;
+            color: white;
+        }
+        .add-department-btn {
+            padding: 8px 16px;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-bottom: 20px;
+        }
+        .pagination {
+            position: sticky;
+            bottom: 0;
+            background-color: #fff;
+            padding: 10px;
+            border-top: 1px solid #ddd;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 10;
+        }
+        .pagination select, .pagination button {
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            cursor: pointer;
+        }
+        .pagination button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .pagination select:focus, .pagination button:focus {
+            outline: none;
+            border-color: #007bff;
+        }
+        .modal-content input, .modal-content select {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .modal-content button {
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            border: none;
+        }
+        .modal-content button[type="submit"] {
+            background-color: #28a745;
+            color: white;
+        }
+        .modal-content button[type="submit"][data-action="delete"] {
+            background-color: #dc3545;
+        }
+    </style>
 </head>
-
-<body class="department-management">
+<body class="admin-dashboard">
     <!-- Admin Sidebar -->
-    <div class="sidebar">
-        <button class="toggle-btn" title="Toggle Sidebar" aria-label="Toggle Sidebar"><i class="fas fa-bars"></i></button>
-        <h2 class="sidebar-title">Admin Panel</h2>
-        <a href="dashboard.php" class="client-btn"><i class="fas fa-exchange-alt"></i><span class="link-text">Switch to Client View</span></a>
-        <a href="admin_dashboard.php"><i class="fas fa-home"></i><span class="link-text">Dashboard</span></a>
-        <a href="admin_search.php"><i class="fas fa-search"></i><span class="link-text">View All Files</span></a>
-        <a href="user_management.php"><i class="fas fa-users"></i><span class="link-text">User Management</span></a>
-        <a href="department_management.php" class="active"><i class="fas fa-building"></i><span class="link-text">Department Management</span></a>
-        <a href="physical_storage_management.php"><i class="fas fa-archive"></i><span class="link-text">Physical Storage</span></a>
-        <a href="document_type_management.php"><i class="fas fa-file-alt"></i><span class="link-text">Document Type Management</span></a>
-        <a href="logout.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i><span class="link-text">Logout</span></a>
-    </div>
+    <?php
+        include 'admin_menu.php';
+    ?>
 
-    <!-- Main Content -->
-    <div class="main-content sidebar-expanded">
-        <!-- CSRF Token -->
-        <input type="hidden" id="csrf_token" value="<?= htmlspecialchars(generateCsrfToken(), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>">
+    <div class="main-content">
+        <h2>Department Management</h2>
+        <?php if ($successMessage): ?>
+            <p class="success"><?php echo sanitizeHTML($successMessage); ?></p>
+        <?php endif; ?>
+        <?php if ($errorMessage): ?>
+            <p class="error"><?php echo sanitizeHTML($errorMessage); ?></p>
+        <?php endif; ?>
 
-        <!-- Header -->
-        <header class="page-header">
-            <h1>Department Management</h1>
-            <p>Manage departments and subdepartments for efficient organization.</p>
-        </header>
+        <button class="add-department-btn" onclick="openModal('add')">Add New Department</button>
 
-        <!-- Action Buttons -->
-        <div class="action-buttons-container">
-            <button id="open-dept-modal-btn" class="open-modal-btn" aria-label="Add New Department"><i class="fas fa-plus"></i> Add Department</button>
-            <button id="open-subdept-modal-btn" class="open-modal-btn" aria-label="Add New Subdepartment"><i class="fas fa-plus"></i> Add Subdepartment</button>
-        </div>
-
-        <!-- Messages -->
-        <?php if (!empty($error)) { ?>
-            <div class="error-message" role="alert"><?= htmlspecialchars($error, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></div>
-        <?php } ?>
-        <?php if (!empty($success)) { ?>
-            <div class="success-message" role="alert"><?= htmlspecialchars($success, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></div>
-        <?php } ?>
-
-        <!-- Departments Display -->
         <div class="table-container">
-            <h2>Departments & Subdepartments</h2>
-            <?php if (empty($departments)) { ?>
-                <p class="no-data">No departments found. Add a department to get started.</p>
-            <?php } else { ?>
-                <?php foreach ($departments as $dept) { ?>
-                    <div class="dept-section">
-                        <div class="dept-header">
-                            <h3><?php echo htmlspecialchars($dept['Department_name'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
-                                (<?php echo htmlspecialchars($dept['Department_type'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>,
-                                <?php echo htmlspecialchars($dept['Name_type'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>)
-                            </h3>
-                            <div class="action-buttons">
-                                <a href="department_management.php?edit_dept=<?php echo htmlspecialchars((string)$dept['Department_id'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>&csrf_token=<?php echo htmlspecialchars(generateCsrfToken(), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
-                                    class="edit-btn"
-                                    aria-label="Edit <?php echo htmlspecialchars($dept['Department_name'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>">
-                                    <i class="fas fa-edit"></i> Edit
-                                </a>
-                                <button class="delete-btn"
-                                    onclick="confirmDelete(<?php echo htmlspecialchars((string)$dept['Department_id'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>)"
-                                    aria-label="Delete <?php echo htmlspecialchars($dept['Department_name'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>">
-                                    <i class="fas fa-trash"></i> Delete
-                                </button>
-                                <?php
-                                $subdepts = array_filter($subdepartments, fn($sd) => $sd['Parent_department_id'] == $dept['Department_id']);
-                                ?>
-                                <div class="dropdown">
-                                    <button class="dropdown-btn" aria-haspopup="true" aria-expanded="false" aria-label="View subdepartments for <?php echo htmlspecialchars($dept['Department_name'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>">
-                                        <i class="fas fa-sitemap"></i> Hierarchy
-                                    </button>
-                                    <div class="dropdown-content">
-                                        <div class="dropdown-header">
-                                            <span><?php echo htmlspecialchars($dept['Department_name'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></span>
-                                        </div>
-                                        <?php if (empty($subdepts)) { ?>
-                                            <div class="dropdown-item no-subdepts">
-                                                <span>No subdepartments</span>
-                                            </div>
-                                        <?php } else { ?>
-                                            <?php foreach ($subdepts as $subdept) { ?>
-                                                <div class="dropdown-item subdept-item">
-                                                    <span><i class="fas fa-angle-right"></i> <?php echo htmlspecialchars($subdept['subdepartment_name'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></span>
-                                                    <button class="delete-btn"
-                                                        onclick="confirmDelete(<?php echo htmlspecialchars((string)$subdept['Department_id'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>)"
-                                                        aria-label="Delete <?php echo htmlspecialchars($subdept['subdepartment_name'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>">
-                                                        <i class="fas fa-trash"></i>
-                                                    </button>
-                                                </div>
-                                            <?php } ?>
-                                        <?php } ?>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                <?php } ?>
-            <?php } ?>
-        </div>
+            <table class="department-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Name</th>
+                        <th>Type</th>
+                        <th>Name Type</th>
+                        <th>Parent</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (empty($paginatedDepartments)): ?>
+                        <tr><td colspan="6">No departments found.</td></tr>
+                    <?php else: ?>
+                        <?php foreach ($paginatedDepartments as $dept): ?>
+                            <tr>
+                                <td><?php echo sanitizeHTML($dept['department_id']); ?></td>
+                                <td><?php echo sanitizeHTML($dept['department_name']); ?></td>
+                                <td><?php echo sanitizeHTML($dept['department_type']); ?></td>
+                                <td><?php echo sanitizeHTML($dept['name_type']); ?></td>
+                                <td><?php echo sanitizeHTML($dept['parent_name']); ?></td>
+                                <td class="action-buttons">
+                                    <button class="edit-btn" onclick='openModal("edit", <?php echo json_encode($dept); ?>)'>Edit</button>
+                                    <button class="delete-btn" onclick='openModal("delete", <?php echo json_encode(['department_id' => $dept['department_id'], 'department_name' => $dept['department_name']]); ?>)'>Delete</button>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </tbody>
+            </table>
 
-        <!-- Department Modal -->
-        <div class="modal" id="dept-modal" role="dialog" aria-labelledby="dept-modal-title" aria-modal="true">
-            <div class="modal-content">
-                <span class="close" aria-label="Close Modal">×</span>
-                <h2 id="dept-modal-title"><?php echo isset($_GET['edit_dept']) ? 'Edit Department' : 'Add Department'; ?></h2>
-                <form method="POST" action="department_management.php" class="modal-form">
-                    <input type="hidden" name="action" value="<?php echo isset($_GET['edit_dept']) ? 'edit_dept' : 'add_dept'; ?>">
-                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(generateCsrfToken(), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>">
-                    <?php if (isset($_GET['edit_dept'])) {
-                        $editDeptId = filter_var($_GET['edit_dept'], FILTER_VALIDATE_INT);
-                        $editStmt = executeQuery($pdo, "SELECT Department_name, Department_type, Name_type FROM departments WHERE Department_id = ? AND Department_type IN ('college', 'office')", [$editDeptId]);
-                        $editDept = $editStmt ? $editStmt->fetch(PDO::FETCH_ASSOC) : null;
-                    ?>
-                        <input type="hidden" name="department_id" value="<?php echo htmlspecialchars((string)$editDeptId, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>">
-                        <div class="form-group">
-                            <label for="dept-name">Department Name</label>
-                            <input type="text" id="dept-name" name="name" placeholder="Enter department name"
-                                value="<?php echo htmlspecialchars($editDept['Department_name'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
-                                required aria-required="true">
-                        </div>
-                        <div class="form-group">
-                            <label for="dept-type">Type</label>
-                            <select id="dept-type" name="type" required aria-required="true">
-                                <option value="college" <?php echo ($editDept['Department_type'] ?? '') === 'college' ? 'selected' : ''; ?>>College</option>
-                                <option value="office" <?php echo ($editDept['Department_type'] ?? '') === 'office' ? 'selected' : ''; ?>>Office</option>
-                            </select>
-                        </div>
-                    <?php } else { ?>
-                        <div class="form-group">
-                            <label for="dept-name">Department Name</label>
-                            <input type="text" id="dept-name" name="name" placeholder="Enter department name" required aria-required="true">
-                        </div>
-                        <div class="form-group">
-                            <label for="dept-type">Type</label>
-                            <select id="dept-type" name="type" required aria-required="true">
-                                <option value="" disabled selected>Select Type</option>
-                                <option value="college">College</option>
-                                <option value="office">Office</option>
-                            </select>
-                        </div>
-                    <?php } ?>
-                    <button type="submit" class="submit-btn"><?php echo isset($_GET['edit_dept']) ? 'Update Department' : 'Add Department'; ?></button>
-                </form>
-            </div>
-        </div>
-
-        <!-- Subdepartment Modal -->
-        <div class="modal" id="subdept-modal" role="dialog" aria-labelledby="subdept-modal-title" aria-modal="true">
-            <div class="modal-content">
-                <span class="close" aria-label="Close Modal">×</span>
-                <h2 id="subdept-modal-title">Add Subdepartment</h2>
-                <form method="POST" action="department_management.php" class="modal-form">
-                    <input type="hidden" name="action" value="add_subdept">
-                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(generateCsrfToken(), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>">
-                    <div class="form-group">
-                        <label for="subdept-name">Subdepartment Name</label>
-                        <input type="text" id="subdept-name" name="name" placeholder="Enter subdepartment name" required aria-required="true">
-                    </div>
-                    <div class="form-group">
-                        <label for="parent-dept">Parent Department</label>
-                        <select id="parent-dept" name="parent_dept_id" required aria-required="true">
-                            <option value="" disabled selected>Select Parent Department</option>
-                            <?php foreach ($departments as $dept) { ?>
-                                <option value="<?php echo htmlspecialchars((string)$dept['Department_id'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>">
-                                    <?php echo htmlspecialchars($dept['Department_name'] . ' (' . $dept['Department_type'] . ')', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
-                                </option>
-                            <?php } ?>
-                        </select>
-                    </div>
-                    <button type="submit" class="submit-btn">Add Subdepartment</button>
-                </form>
-            </div>
-        </div>
-
-        <!-- Warning Modal for Deletion -->
-        <div class="modal warning-modal" id="warning-delete-modal" role="dialog" aria-labelledby="warning-modal-title" aria-modal="true">
-            <div class="warning-modal-content">
-                <span class="close" aria-label="Close Modal">×</span>
-                <h2 id="warning-modal-title">Confirm Deletion</h2>
-                <p>Are you sure you want to delete this department/subdepartment? This action cannot be undone.</p>
-                <div class="buttons">
-                    <button class="confirm-btn" id="confirm-delete">Yes</button>
-                    <button class="cancel-btn">No</button>
+            <!-- Pagination Controls -->
+            <div class="pagination">
+                <div>
+                    <label for="items_per_page">Items per page:</label>
+                    <select id="items_per_page" onchange="updateItemsPerPage()">
+                        <option value="5" <?php echo $itemsPerPage === 5 ? 'selected' : ''; ?>>5</option>
+                        <option value="10" <?php echo $itemsPerPage === 10 ? 'selected' : ''; ?>>10</option>
+                        <option value="20" <?php echo $itemsPerPage === 20 ? 'selected' : ''; ?>>20</option>
+                        <option value="-1" <?php echo $itemsPerPage === -1 ? 'selected' : ''; ?>>All</option>
+                    </select>
                 </div>
+                <div>
+                    <button onclick="goToPage(<?php echo $currentPage - 1; ?>)" <?php echo $currentPage <= 1 ? 'disabled' : ''; ?>>Previous</button>
+                    <span>Page <?php echo $currentPage; ?> of <?php echo $totalPages; ?></span>
+                    <button onclick="goToPage(<?php echo $currentPage + 1; ?>)" <?php echo $currentPage >= $totalPages ? 'disabled' : ''; ?>>Next</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal for Add/Edit/Delete -->
+        <div class="modal" id="department-modal">
+            <div class="modal-content">
+                <span class="close" onclick="closeModal()">&times;</span>
+                <h3 id="modal-title">Department Action</h3>
+                <form id="department-form" method="POST">
+                    <input type="hidden" name="action" id="form-action">
+                    <input type="hidden" name="department_id" id="department_id">
+                    <input type="hidden" name="csrf_token" value="<?php echo $csrfToken; ?>">
+                    <div id="form-content">
+                        <!-- Dynamic form content will be injected here -->
+                    </div>
+                    <button type="submit" id="form-submit" data-action="">Submit</button>
+                </form>
             </div>
         </div>
     </div>
 
     <script>
-        // Initialize Notyf for notifications
-        const notyf = new Notyf({
-            duration: 5000,
-            position: {
-                x: 'right',
-                y: 'top'
-            },
-            ripple: true
-        });
-
-        document.addEventListener('DOMContentLoaded', () => {
-            // Show persisted messages
-            <?php if (!empty($error)) { ?>
-                notyf.error('<?php echo htmlspecialchars($error, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>');
-            <?php } ?>
-            <?php if (!empty($success)) { ?>
-                notyf.success('<?php echo htmlspecialchars($success, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>');
-            <?php } ?>
-
-            // Sidebar toggle
+        function toggleSidebar() {
             const sidebar = document.querySelector('.sidebar');
             const mainContent = document.querySelector('.main-content');
-            const toggleBtn = document.querySelector('.toggle-btn');
-            if (toggleBtn) {
-                toggleBtn.addEventListener('click', () => {
-                    sidebar.classList.toggle('minimized');
-                    mainContent.classList.toggle('sidebar-expanded');
-                    mainContent.classList.toggle('sidebar-minimized');
-                });
+            sidebar.classList.toggle('minimized');
+            mainContent.classList.toggle('sidebar-minimized');
+        }
+
+        function openModal(action, data = {}) {
+            const modal = document.getElementById('department-modal');
+            const modalTitle = document.getElementById('modal-title');
+            const formAction = document.getElementById('form-action');
+            const formContent = document.getElementById('form-content');
+            const formSubmit = document.getElementById('form-submit');
+            const departmentId = document.getElementById('department_id');
+
+            modal.style.display = 'flex';
+            formAction.value = action === 'add' ? 'add_department' : action === 'edit' ? 'edit_department' : 'delete_department';
+            formSubmit.setAttribute('data-action', action);
+
+            if (action === 'delete') {
+                departmentId.value = data.department_id || '';
+                modalTitle.textContent = 'Delete Department';
+                formContent.innerHTML = `
+                    <p>Are you sure you want to delete the department "${sanitizeHTML(data.department_name)}"?</p>
+                `;
+                formSubmit.textContent = 'Delete';
+                formSubmit.style.backgroundColor = '#dc3545';
+            } else {
+                departmentId.value = action === 'edit' ? data.department_id || '' : '';
+                modalTitle.textContent = action === 'add' ? 'Add New Department' : 'Edit Department';
+                formContent.innerHTML = `
+                    <label for="department_name">Department Name:</label>
+                    <input type="text" id="department_name" name="department_name" value="${action === 'edit' ? sanitizeHTML(data.department_name || '') : ''}" required><br>
+                    <label for="department_type">Department Type:</label>
+                    <select id="department_type" name="department_type" required>
+                        <option value="college" ${action === 'edit' && data.department_type === 'college' ? 'selected' : ''}>College</option>
+                        <option value="office" ${action === 'edit' && data.department_type === 'office' ? 'selected' : ''}>Office</option>
+                        <option value="sub_department" ${action === 'edit' && data.department_type === 'sub_department' ? 'selected' : ''}>Sub-Department</option>
+                    </select><br>
+                    <label for="name_type">Name Type:</label>
+                    <select id="name_type" name="name_type" required>
+                        <option value="Academic" ${action === 'edit' && data.name_type === 'Academic' ? 'selected' : ''}>Academic</option>
+                        <option value="Administrative" ${action === 'edit' && data.name_type === 'Administrative' ? 'selected' : ''}>Administrative</option>
+                        <option value="Program" ${action === 'edit' && data.name_type === 'Program' ? 'selected' : ''}>Program</option>
+                    </select><br>
+                    <label for="parent_department_id">Parent Department (Optional):</label>
+                    <select id="parent_department_id" name="parent_department_id">
+                        <option value="">None</option>
+                        <?php foreach ($parentDepartments as $parent): ?>
+                            <option value="<?php echo $parent['department_id']; ?>" ${action === 'edit' && data.parent_department_id == <?php echo $parent['department_id']; ?> ? 'selected' : ''}>
+                                <?php echo sanitizeHTML($parent['department_name']); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                `;
+                formSubmit.textContent = action === 'add' ? 'Add Department' : 'Update Department';
+                formSubmit.style.backgroundColor = '#28a745';
             }
+        }
 
-            // Modal handling
-            const modals = {
-                dept: document.getElementById('dept-modal'),
-                subdept: document.getElementById('subdept-modal'),
-                warning: document.getElementById('warning-delete-modal')
-            };
+        function closeModal() {
+            const modal = document.getElementById('department-modal');
+            modal.style.display = 'none';
+        }
 
-            const openModal = (modalId) => {
-                const modal = modals[modalId];
-                if (modal) {
-                    modal.style.display = 'flex';
-                    modal.querySelector('.modal-content')?.focus();
-                }
-            };
+        function sanitizeHTML(str) {
+            const div = document.createElement('div');
+            div.textContent = str ?? '';
+            return div.innerHTML;
+        }
 
-            const closeModal = (modalId) => {
-                const modal = modals[modalId];
-                if (modal) {
-                    modal.style.display = 'none';
-                }
-            };
+        function updateItemsPerPage() {
+            const itemsPerPage = document.getElementById('items_per_page').value;
+            window.location.href = `department_management.php?items_per_page=${itemsPerPage}&page=1`;
+        }
 
-            // Department Modal
-            const openDeptModalBtn = document.getElementById('open-dept-modal-btn');
-            if (openDeptModalBtn) {
-                openDeptModalBtn.addEventListener('click', () => openModal('dept'));
-            }
+        function goToPage(page) {
+            const itemsPerPage = document.getElementById('items_per_page').value;
+            window.location.href = `department_management.php?items_per_page=${itemsPerPage}&page=${page}`;
+        }
 
-            // Subdepartment Modal
-            const openSubdeptModalBtn = document.getElementById('open-subdept-modal-btn');
-            if (openSubdeptModalBtn) {
-                openSubdeptModalBtn.addEventListener('click', () => openModal('subdept'));
-            }
+        // Set initial sidebar state and handle modal close
+        document.addEventListener('DOMContentLoaded', () => {
+            const sidebar = document.querySelector('.sidebar');
+            const mainContent = document.querySelector('.main-content');
+            mainContent.classList.add(sidebar.classList.contains('minimized') ? 'sidebar-minimized' : '');
 
-            // Close modals
-            document.querySelectorAll('.modal .close').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    const modal = btn.closest('.modal');
-                    closeModal(modal.id.split('-')[0]);
-                });
-            });
-
-            // Close modals when clicking outside
+            // Handle modal close on click outside
             window.addEventListener('click', (event) => {
-                Object.keys(modals).forEach(key => {
-                    if (event.target === modals[key]) {
-                        closeModal(key);
-                    }
-                });
-            });
-
-            // Auto-open modal for editing
-            <?php if (isset($_GET['edit_dept'])) { ?>
-                openModal('dept');
-            <?php } ?>
-
-            // Dropdown handling
-            document.querySelectorAll('.dropdown-btn').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    const dropdownContent = btn.nextElementSibling;
-                    const isOpen = dropdownContent.classList.contains('show');
-
-                    // Close all other dropdowns
-                    document.querySelectorAll('.dropdown-content.show').forEach(content => {
-                        content.classList.remove('show');
-                        content.previousElementSibling.setAttribute('aria-expanded', 'false');
-                    });
-
-                    // Toggle current dropdown
-                    if (!isOpen) {
-                        dropdownContent.classList.add('show');
-                        btn.setAttribute('aria-expanded', 'true');
-                    }
-                });
-
-                // Keyboard support for dropdown
-                btn.addEventListener('keydown', (e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        btn.click();
-                    }
-                });
-            });
-
-            // Close dropdowns when clicking outside
-            document.addEventListener('click', (e) => {
-                if (!e.target.closest('.dropdown')) {
-                    document.querySelectorAll('.dropdown-content.show').forEach(content => {
-                        content.classList.remove('show');
-                        content.previousElementSibling.setAttribute('aria-expanded', 'false');
-                    });
+                const modal = document.getElementById('department-modal');
+                if (event.target === modal) {
+                    closeModal();
                 }
-            });
-
-            // Close dropdowns with Escape key
-            document.addEventListener('keydown', (e) => {
-                if (e.key === 'Escape') {
-                    document.querySelectorAll('.dropdown-content.show').forEach(content => {
-                        content.classList.remove('show');
-                        content.previousElementSibling.setAttribute('aria-expanded', 'false');
-                    });
-                }
-            });
-
-            // Form submission with loading state
-            document.querySelectorAll('.modal-form').forEach(form => {
-                form.addEventListener('submit', (e) => {
-                    const submitBtn = form.querySelector('.submit-btn');
-                    if (submitBtn) {
-                        submitBtn.disabled = true;
-                        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
-                    }
-                    const csrfToken = document.getElementById('csrf_token')?.value;
-                    if (!csrfToken) {
-                        e.preventDefault();
-                        notyf.error('CSRF token missing');
-                        if (submitBtn) {
-                            submitBtn.disabled = false;
-                            submitBtn.innerHTML = form.querySelector('input[name="action"]').value === 'add_dept' ? 'Add Department' : 'Update Department';
-                        }
-                    }
-                });
-            });
-
-            // Deletion confirmation
-            let pendingDeptId = null;
-
-            window.confirmDelete = (deptId) => {
-                pendingDeptId = deptId;
-                openModal('warning');
-            };
-
-            const confirmDeleteBtn = document.getElementById('confirm-delete');
-            if (confirmDeleteBtn) {
-                confirmDeleteBtn.addEventListener('click', () => {
-                    if (pendingDeptId !== null) {
-                        const csrfToken = document.getElementById('csrf_token')?.value;
-                        window.location.href = `department_management.php?delete_dept=${pendingDeptId}&csrf_token=${encodeURIComponent(csrfToken)}`;
-                    }
-                    closeModal('warning');
-                    pendingDeptId = null;
-                });
-            }
-
-            const cancelWarningBtn = document.querySelector('.warning-modal .cancel-btn');
-            if (cancelWarningBtn) {
-                cancelWarningBtn.addEventListener('click', () => closeModal('warning'));
-            }
-
-            // Keyboard navigation for modals
-            document.querySelectorAll('.modal').forEach(modal => {
-                modal.addEventListener('keydown', (e) => {
-                    if (e.key === 'Escape') {
-                        closeModal(modal.id.split('-')[0]);
-                    }
-                });
             });
         });
     </script>
 </body>
-
 </html>

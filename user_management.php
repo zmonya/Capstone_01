@@ -1,413 +1,280 @@
 <?php
 session_start();
-require 'db_connection.php'; // Assumes $pdo is initialized with PDO connection
-require 'log_activity.php'; // Assumes logging function for transaction table
-require 'vendor/autoload.php'; // Load Composer autoloader for phpdotenv
-
-use Dotenv\Dotenv;
-
-// Load environment variables
-$dotenv = Dotenv::createImmutable(__DIR__);
-$dotenv->load();
-
-// Disable error display in production
-ini_set('display_errors', 0);
-ini_set('display_startup_errors', 0);
-ini_set('error_log', __DIR__ . '/logs/error_log.log');
-error_reporting(E_ALL);
+require 'db_connection.php';
 
 // Security headers
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
 header('X-XSS-Protection: 1; mode=block');
 
-/**
- * Sends a JSON response with appropriate HTTP status for AJAX requests.
- *
- * @param bool $success
- * @param string $message
- * @param array $data
- * @param int $statusCode
- * @return void
- */
-function sendJsonResponse(bool $success, string $message, array $data, int $statusCode): void
+// CSRF token generation and validation
+function generateCsrfToken()
 {
-    header('Content-Type: application/json; charset=UTF-8');
-    http_response_code($statusCode);
-    echo json_encode(array_merge(['success' => $success, 'message' => $message], $data));
-    exit;
-}
-
-/**
- * Validates user session and admin role, redirects if invalid.
- *
- * @param PDO $pdo Database connection
- * @return int User ID
- */
-function validateAdminSession(PDO $pdo): int
-{
-    if (!isset($_SESSION['user_id']) || !isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
-        // Log unauthorized access attempt
-        $message = 'Unauthorized access attempt to user_management.php';
-        try {
-            $stmt = $pdo->prepare("
-                INSERT INTO transaction (User_id, Transaction_status, Transaction_type, Time, Massage)
-                VALUES (?, 'failed', 22, NOW(), ?)
-            ");
-            $stmt->execute([$_SESSION['user_id'] ?? null, $message]);
-        } catch (PDOException $e) {
-            error_log("Failed to log unauthorized access: " . $e->getMessage(), 3, __DIR__ . '/logs/error_log.log');
-        }
-
-        // Store error message in session and redirect
-        $_SESSION['error'] = 'Access denied: Admin privileges required.';
-        header('Location: login.php');
-        exit;
-    }
-    session_regenerate_id(true); // Regenerate session ID for security
-    return (int)$_SESSION['user_id'];
-}
-
-/**
- * Validates input data for user management.
- *
- * @param array $data
- * @param bool $isAdd
- * @return string Error message or empty string if valid
- */
-function validateInput(array $data, bool $isAdd): string
-{
-    if (empty($data['username']) || strlen($data['username']) > 255) {
-        return 'Username is required and must be 255 characters or less.';
-    }
-    if ($isAdd && (empty($data['password']) || strlen($data['password']) < 8)) {
-        return 'Password is required and must be at least 8 characters for new users.';
-    }
-    if (!is_numeric($data['position']) || $data['position'] < 0) {
-        return 'Position must be a non-negative integer.';
-    }
-    if (!in_array($data['role'], ['admin', 'client'])) {
-        return 'Role must be either "admin" or "client".';
-    }
-    if (empty($data['department_ids'])) {
-        return 'At least one department must be selected.';
-    }
-    return '';
-}
-
-/**
- * Processes and saves profile picture as BLOB.
- *
- * @param string $croppedImage Base64-encoded image
- * @return string|null Base64-encoded image or null
- * @throws Exception If image processing fails
- */
-function processProfilePicture(string $croppedImage): ?string
-{
-    if (empty($croppedImage)) {
-        return null;
-    }
-    $imageData = base64_decode(preg_replace('#^data:image/\w+;base64,#i', '', $croppedImage));
-    if ($imageData === false) {
-        throw new Exception('Invalid image data.', 400);
-    }
-    // Validate image size (e.g., max 1MB)
-    if (strlen($imageData) > 1024 * 1024) {
-        throw new Exception('Profile picture size exceeds 1MB.', 400);
-    }
-    return $imageData;
-}
-
-/**
- * Fetches all users with their department affiliations.
- *
- * @param PDO $pdo
- * @return array
- */
-function fetchAllUsers(PDO $pdo): array
-{
-    $stmt = $pdo->prepare("
-        SELECT u.User_id AS id, u.Username AS username, u.Position AS position, u.Role AS role, u.Profile_pic AS profile_pic,
-               GROUP_CONCAT(DISTINCT d.Department_name ORDER BY d.Department_name SEPARATOR ', ') AS department_names
-        FROM users u
-        LEFT JOIN users_department ud ON u.User_id = ud.User_id
-        LEFT JOIN departments d ON ud.Department_id = d.Department_id
-        GROUP BY u.User_id
-        ORDER BY u.Username
-    ");
-    $stmt->execute();
-    return $stmt->fetchAll(PDO::FETCH_ASSOC);
-}
-
-/**
- * Fetches all departments.
- *
- * @param PDO $pdo
- * @return array
- */
-function fetchAllDepartments(PDO $pdo): array
-{
-    $stmt = $pdo->prepare("SELECT Department_id AS id, Department_name AS name FROM departments ORDER BY Department_name");
-    $stmt->execute();
-    return $stmt->fetchAll(PDO::FETCH_ASSOC);
-}
-
-/**
- * Validates department IDs against the database.
- *
- * @param PDO $pdo
- * @param array $departmentIds
- * @return bool
- */
-function validateDepartmentIds(PDO $pdo, array $departmentIds): bool
-{
-    if (empty($departmentIds)) {
-        return false;
-    }
-    $placeholders = implode(',', array_fill(0, count($departmentIds), '?'));
-    $stmt = $pdo->prepare("SELECT COUNT(*) FROM departments WHERE Department_id IN ($placeholders)");
-    $stmt->execute($departmentIds);
-    $count = $stmt->fetchColumn();
-    return $count === count($departmentIds);
-}
-
-try {
-    // Validate admin session at the start
-    $adminId = validateAdminSession($pdo);
-    $error = '';
-
-    // Handle CSRF token
     if (empty($_SESSION['csrf_token'])) {
         $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
     }
-    $csrfToken = $_SESSION['csrf_token'];
+    return $_SESSION['csrf_token'];
+}
 
-    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-        // Verify CSRF token
-        if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $csrfToken) {
-            $message = 'Invalid CSRF token during POST request';
-            $stmt = $pdo->prepare("
-                INSERT INTO transaction (User_id, Transaction_status, Transaction_type, Time, Massage)
-                VALUES (?, 'failed', 22, NOW(), ?)
-            ");
-            $stmt->execute([$adminId, $message]);
-            sendJsonResponse(false, 'Invalid CSRF token.', [], 403);
-        }
+// Validate CSRF token
+function validateCsrfToken($token)
+{
+    return isset($_SESSION['csrf_token']) && hash_equals($_SESSION['csrf_token'], $token);
+}
 
-        $action = filter_input(INPUT_POST, 'action', FILTER_SANITIZE_STRING) ?? '';
-        if (!in_array($action, ['add', 'edit'])) {
-            throw new Exception('Invalid action.', 400);
-        }
+// Redirect to login if not authenticated or not an admin
+if (!isset($_SESSION['user_id']) || !isset($_SESSION['role'])) {
+    header('Location: login.php');
+    exit();
+}
 
-        $username = trim(filter_input(INPUT_POST, 'username', FILTER_SANITIZE_SPECIAL_CHARS) ?? '');
-        $password = trim(filter_input(INPUT_POST, 'password', FILTER_SANITIZE_SPECIAL_CHARS) ?? '');
-        $position = filter_input(INPUT_POST, 'position', FILTER_VALIDATE_INT, ['options' => ['default' => 0, 'min_range' => 0]]) ?? 0;
-        $department_ids = array_filter(array_map('intval', explode(',', trim($_POST['departments'] ?? ''))));
-        $cropped_image = trim($_POST['cropped_image'] ?? '');
-        $role = trim(filter_input(INPUT_POST, 'role', FILTER_SANITIZE_STRING) ?? '');
+if ($_SESSION['role'] !== 'admin') {
+    header('Location: unauthorized.php');
+    exit();
+}
 
-        // Validate inputs
-        $error = validateInput([
-            'username' => $username,
-            'password' => $password,
-            'position' => $position,
-            'role' => $role,
-            'department_ids' => $department_ids
-        ], $action === 'add');
+$userId = filter_var($_SESSION['user_id'], FILTER_VALIDATE_INT);
+if ($userId === false) {
+    session_destroy();
+    header('Location: login.php');
+    exit();
+}
 
-        // Validate department IDs
-        if (empty($error) && !validateDepartmentIds($pdo, $department_ids)) {
-            $error = 'Invalid department IDs selected.';
-        }
-
-        if (empty($error)) {
-            $stmt = $pdo->prepare("SELECT User_id FROM users WHERE Username = ?");
-            $stmt->execute([$username]);
-            $existingUser = $stmt->fetch();
-
-            if ($action === 'add' && $existingUser) {
-                $error = 'Username already exists.';
-            } elseif ($action === 'edit' && $existingUser && $existingUser['User_id'] != ($_POST['user_id'] ?? 0)) {
-                $error = 'Username is already taken by another user.';
-            } else {
-                $profile_pic = processProfilePicture($cropped_image);
-                $pdo->beginTransaction();
-
-                if ($action === 'add') {
-                    $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
-                    $stmt = $pdo->prepare("
-                        INSERT INTO users (Username, Password, Role, Profile_pic, Position, Created_at)
-                        VALUES (?, ?, ?, ?, ?, NOW())
-                    ");
-                    $stmt->execute([$username, $hashedPassword, $role, $profile_pic, $position]);
-                    $user_id = $pdo->lastInsertId();
-                    $logMessage = "Added user: $username";
-                } else { // edit
-                    $user_id = filter_input(INPUT_POST, 'user_id', FILTER_VALIDATE_INT);
-                    if (!$user_id) {
-                        throw new Exception('Invalid user ID.', 400);
-                    }
-                    $stmt = $pdo->prepare("
-                        UPDATE users SET Username = ?, Position = ?, Role = ?, Profile_pic = COALESCE(?, Profile_pic)
-                        WHERE User_id = ?
-                    ");
-                    $stmt->execute([$username, $position, $role, $profile_pic, $user_id]);
-                    if (!empty($password)) {
-                        $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
-                        $stmt = $pdo->prepare("UPDATE users SET Password = ? WHERE User_id = ?");
-                        $stmt->execute([$hashedPassword, $user_id]);
-                    }
-                    $logMessage = "Edited user: $username";
-                }
-
-                // Update department affiliations
-                $stmt = $pdo->prepare("DELETE FROM users_department WHERE User_id = ?");
-                $stmt->execute([$user_id]);
-
-                foreach ($department_ids as $dept_id) {
-                    $stmt = $pdo->prepare("
-                        INSERT INTO users_department (User_id, Department_id)
-                        VALUES (?, ?)
-                    ");
-                    $stmt->execute([$user_id, $dept_id]);
-                }
-
-                // Log action in transaction table
-                $stmt = $pdo->prepare("
-                    INSERT INTO transaction (User_id, Transaction_status, Transaction_type, Time, Massage)
-                    VALUES (?, 'completed', 22, NOW(), ?)
-                ");
-                $stmt->execute([$adminId, $logMessage]);
-
-                $pdo->commit();
-                sendJsonResponse(true, 'User ' . ($action === 'add' ? 'added' : 'updated') . ' successfully.', [], 200);
-            }
-        }
-        if (!empty($error)) {
-            sendJsonResponse(false, $error, [], 400);
-        }
-    }
-
-    if (isset($_GET['delete'])) {
-        // Verify CSRF token for delete action
-        if (!isset($_GET['csrf_token']) || $_GET['csrf_token'] !== $csrfToken) {
-            $message = 'Invalid CSRF token during DELETE request';
-            $stmt = $pdo->prepare("
-                INSERT INTO transaction (User_id, Transaction_status, Transaction_type, Time, Massage)
-                VALUES (?, 'failed', 22, NOW(), ?)
-            ");
-            $stmt->execute([$adminId, $message]);
-            $_SESSION['error'] = 'Invalid CSRF token.';
-            header('Location: login.php');
-            exit;
-        }
-
-        $user_id = filter_input(INPUT_GET, 'delete', FILTER_VALIDATE_INT);
-        if (!$user_id) {
-            throw new Exception('Invalid user ID for deletion.', 400);
-        }
-        if ($user_id === $adminId) {
-            throw new Exception('Cannot delete your own account.', 403);
-        }
-
-        $pdo->beginTransaction();
-        $stmt = $pdo->prepare("SELECT Username FROM users WHERE User_id = ?");
-        $stmt->execute([$user_id]);
-        $username = $stmt->fetchColumn();
-        if (!$username) {
-            throw new Exception('User not found.', 404);
-        }
-
-        $stmt = $pdo->prepare("DELETE FROM users_department WHERE User_id = ?");
-        $stmt->execute([$user_id]);
-
-        $stmt = $pdo->prepare("DELETE FROM users WHERE User_id = ?");
-        $stmt->execute([$user_id]);
-
-        $stmt = $pdo->prepare("
-            INSERT INTO transaction (User_id, Transaction_status, Transaction_type, Time, Massage)
-            VALUES (?, 'completed', 22, NOW(), ?)
-        ");
-        $stmt->execute([$adminId, "Deleted user: $username"]);
-
-        $pdo->commit();
-        header('Location: user_management.php');
-        exit;
-    }
-
-    $users = fetchAllUsers($pdo);
-    $departments = fetchAllDepartments($pdo);
-} catch (Exception $e) {
-    error_log("Error in user_management.php: " . $e->getMessage(), 3, __DIR__ . '/logs/error_log.log');
-    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-        sendJsonResponse(false, 'Server error: ' . $e->getMessage(), [], $e->getCode() ?: 500);
-    } else {
-        $_SESSION['error'] = 'Server error: ' . $e->getMessage();
-        header('Location: login.php');
-        exit;
+// Function to execute prepared queries safely
+function executeQuery($pdo, $query, $params = [])
+{
+    try {
+        $stmt = $pdo->prepare($query);
+        $stmt->execute($params);
+        return $stmt;
+    } catch (PDOException $e) {
+        error_log("Database error: " . $e->getMessage());
+        return false;
     }
 }
+
+// Function to sanitize HTML output
+function sanitizeHTML($data)
+{
+    return htmlspecialchars($data ?? '', ENT_QUOTES, 'UTF-8');
+}
+
+// Handle form submissions
+$successMessage = '';
+$errorMessage = '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && validateCsrfToken($_POST['csrf_token'] ?? '')) {
+    $action = $_POST['action'] ?? '';
+
+    if ($action === 'add_user') {
+        $username = trim($_POST['username'] ?? '');
+        $email = filter_var($_POST['email'] ?? '', FILTER_SANITIZE_EMAIL);
+        $password = password_hash($_POST['password'] ?? '', PASSWORD_BCRYPT);
+        $role = in_array($_POST['role'] ?? '', ['admin', 'user', 'client']) ? $_POST['role'] : 'user';
+        $position = filter_var($_POST['position'] ?? 0, FILTER_VALIDATE_INT, ['options' => ['default' => 0]]);
+        $department_ids = isset($_POST['departments']) ? array_map('intval', $_POST['departments']) : [];
+
+        // Handle profile picture
+        $profile_pic = null;
+        if (isset($_FILES['profile_pic']) && $_FILES['profile_pic']['error'] === UPLOAD_ERR_OK) {
+            $allowed_types = ['image/jpeg', 'image/png'];
+            $file_type = mime_content_type($_FILES['profile_pic']['tmp_name']);
+            if (in_array($file_type, $allowed_types)) {
+                $profile_pic = file_get_contents($_FILES['profile_pic']['tmp_name']);
+            }
+        }
+
+        if (!empty($username) && !empty($email) && !empty($_POST['password'])) {
+            $insertUserStmt = executeQuery($pdo, "
+                INSERT INTO users (username, password, email, role, position, profile_pic, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, NOW())",
+                [$username, $password, $email, $role, $position, $profile_pic]);
+            if ($insertUserStmt) {
+                $new_user_id = $pdo->lastInsertId();
+                foreach ($department_ids as $department_id) {
+                    executeQuery($pdo, "
+                        INSERT INTO users_department (user_id, department_id)
+                        VALUES (?, ?)",
+                        [$new_user_id, $department_id]);
+                }
+                executeQuery($pdo, "
+                    INSERT INTO transactions (user_id, transaction_type, transaction_status, transaction_time, description)
+                    VALUES (?, 'edit_user', 'completed', NOW(), ?)",
+                    [$userId, "Added user: $username"]);
+                $successMessage = 'User added successfully.';
+            } else {
+                $errorMessage = 'Failed to add user.';
+            }
+        } else {
+            $errorMessage = 'All required fields must be filled.';
+        }
+    } elseif ($action === 'edit_user') {
+        $edit_user_id = (int)($_POST['user_id'] ?? 0);
+        $username = trim($_POST['username'] ?? '');
+        $email = filter_var($_POST['email'] ?? '', FILTER_SANITIZE_EMAIL);
+        $role = in_array($_POST['role'] ?? '', ['admin', 'user', 'client']) ? $_POST['role'] : 'user';
+        $position = filter_var($_POST['position'] ?? 0, FILTER_VALIDATE_INT, ['options' => ['default' => 0]]);
+        $department_ids = isset($_POST['departments']) ? array_map('intval', $_POST['departments']) : [];
+
+        $password_sql = '';
+        $params = [$username, $email, $role, $position];
+        if (!empty($_POST['password'])) {
+            $password = password_hash($_POST['password'], PASSWORD_BCRYPT);
+            $password_sql = ', password = ?';
+            $params[] = $password;
+        }
+
+        $profile_pic_sql = '';
+        if (isset($_FILES['profile_pic']) && $_FILES['profile_pic']['error'] === UPLOAD_ERR_OK) {
+            $allowed_types = ['image/jpeg', 'image/png'];
+            $file_type = mime_content_type($_FILES['profile_pic']['tmp_name']);
+            if (in_array($file_type, $allowed_types)) {
+                $profile_pic = file_get_contents($_FILES['profile_pic']['tmp_name']);
+                $profile_pic_sql = ', profile_pic = ?';
+                $params[] = $profile_pic;
+            }
+        }
+
+        $params[] = $edit_user_id;
+        if ($edit_user_id > 0 && !empty($username) && !empty($email)) {
+            $updateUserStmt = executeQuery($pdo, "
+                UPDATE users 
+                SET username = ?, email = ?, role = ?, position = ? $password_sql $profile_pic_sql
+                WHERE user_id = ?",
+                $params);
+            if ($updateUserStmt) {
+                executeQuery($pdo, "DELETE FROM users_department WHERE user_id = ?", [$edit_user_id]);
+                foreach ($department_ids as $department_id) {
+                    executeQuery($pdo, "
+                        INSERT INTO users_department (user_id, department_id)
+                        VALUES (?, ?)",
+                        [$edit_user_id, $department_id]);
+                }
+                executeQuery($pdo, "
+                    INSERT INTO transactions (user_id, transaction_type, transaction_status, transaction_time, description)
+                    VALUES (?, 'edit_user', 'completed', NOW(), ?)",
+                    [$userId, "Edited user: $username"]);
+                $successMessage = 'User updated successfully.';
+            } else {
+                $errorMessage = 'Failed to update user.';
+            }
+        } else {
+            $errorMessage = 'Invalid data for update.';
+        }
+    } elseif ($action === 'delete_user') {
+        $delete_user_id = (int)($_POST['user_id'] ?? 0);
+        if ($delete_user_id > 0 && $delete_user_id != $userId) {
+            $deleteStmt = executeQuery($pdo, "DELETE FROM users WHERE user_id = ?", [$delete_user_id]);
+            if ($deleteStmt) {
+                executeQuery($pdo, "
+                    INSERT INTO transactions (user_id, transaction_type, transaction_status, transaction_time, description)
+                    VALUES (?, 'edit_user', 'completed', NOW(), ?)",
+                    [$userId, "Deleted user ID: $delete_user_id"]);
+                $successMessage = 'User deleted successfully.';
+            } else {
+                $errorMessage = 'Failed to delete user.';
+            }
+        } else {
+            $errorMessage = 'Cannot delete your own account or invalid user ID.';
+        }
+    }
+}
+
+// Fetch all departments for the add/edit form
+$departmentsStmt = executeQuery($pdo, "
+    SELECT department_id, department_name, parent_department_id
+    FROM departments
+    ORDER BY department_name");
+$departments = $departmentsStmt ? $departmentsStmt->fetchAll(PDO::FETCH_ASSOC) : [];
+
+// Fetch users with filtering and pagination
+$roleFilter = isset($_GET['role_filter']) ? trim($_GET['role_filter']) : '';
+$roleFilter = in_array($roleFilter, ['admin', 'user', 'client']) ? $roleFilter : '';
+
+$itemsPerPage = isset($_GET['items_per_page']) ? (int)$_GET['items_per_page'] : 5;
+if (!in_array($itemsPerPage, [5, 10, 20, -1])) {
+    $itemsPerPage = 5;
+}
+$currentPage = isset($_GET['page']) ? (int)$_GET['page'] : 1;
+$currentPage = max(1, $currentPage);
+$offset = ($currentPage - 1) * $itemsPerPage;
+
+$whereClause = $roleFilter ? "WHERE u.role = ?" : "";
+$params = $roleFilter ? [$roleFilter] : [];
+
+$usersStmt = executeQuery($pdo, "
+    SELECT 
+        u.user_id, 
+        u.username, 
+        u.email, 
+        u.position, 
+        u.role, 
+        u.profile_pic,
+        GROUP_CONCAT(COALESCE(d2.department_name, d.department_name)) AS departments
+    FROM users u
+    LEFT JOIN users_department ud ON u.user_id = ud.user_id
+    LEFT JOIN departments d ON ud.department_id = d.department_id
+    LEFT JOIN departments d2 ON d.parent_department_id = d2.department_id
+    $whereClause
+    GROUP BY u.user_id
+    ORDER BY u.username", $params);
+$users = $usersStmt ? $usersStmt->fetchAll(PDO::FETCH_ASSOC) : [];
+
+$totalItemsStmt = executeQuery($pdo, "SELECT COUNT(*) FROM users $whereClause", $params);
+$totalItems = $totalItemsStmt ? $totalItemsStmt->fetchColumn() : 0;
+
+$paginatedUsers = $users;
+if ($itemsPerPage !== -1) {
+    $paginatedUsers = array_slice($users, $offset, $itemsPerPage);
+}
+$totalPages = $itemsPerPage === -1 ? 1 : max(1, ceil($totalItems / $itemsPerPage));
+
+$csrfToken = generateCsrfToken();
 ?>
 
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <link rel="stylesheet" href="style/admin-interface.css">
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="X-Content-Type-Options" content="nosniff">
-    <meta http-equiv="X-Frame-Options" content="DENY">
-    <meta http-equiv="X-XSS-Protection" content="1; mode=block">
-    <title>User Management - Admin Panel</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" integrity="sha512-z3gLpd7yknf1YoNbCzqRKc4qyor8gaKU1qmn+CShxbuBusANI9QpRohGBreCFkKxLhei6S9CQXFEbbKuqLg0DA==" crossorigin="anonymous" referrerpolicy="no-referrer">
-    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.css" integrity="sha512-hCAg8D0Ji4sG8M4rKEAy7kSOd0pH2j+1vV5f2jVrOjpV+LP2qF+81Tr5QUvA0D2eV2XJC+9cW9k3G4U3V0y2eA==" crossorigin="anonymous" referrerpolicy="no-referrer">
-    <link rel="stylesheet" href="admin-sidebar.css">
-    <link rel="stylesheet" href="admin-interface.css">
+    <title>User Management - ArcHive</title>
+    <?php
+        include 'admin_head.php';
+    ?>
+
+
+
     <style>
+
         .main-content {
+            margin-left: 290px;
             padding: 20px;
+            flex: 1;
+            overflow-y: auto;
             transition: margin-left 0.3s ease;
         }
-
+/*         .main-content.sidebar-minimized {
+            margin-left: 60px;
+        } */
+        .error, .success {
+            font-weight: bold;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            width: fit-content;
+        }
         .error {
             color: #dc3545;
-            font-weight: bold;
-            margin-bottom: 10px;
+            background-color: #f8d7da;
         }
-
-        .department-item,
-        .selected-department {
-            cursor: pointer;
-            padding: 5px 10px;
-            margin: 2px;
-            border-radius: 4px;
+        .success {
+            color: #28a745;
+            background-color: #d4edda;
+            animation: fadeOut 5s forwards;
         }
-
-        .department-item:hover {
-            background-color: #f0f0f0;
+        @keyframes fadeOut {
+            0% { opacity: 1; }
+            80% { opacity: 1; }
+            100% { opacity: 0; display: none; }
         }
-
-        .department-item.selected {
-            background-color: #007bff;
-            color: white;
-        }
-
-        .selected-department {
-            background-color: #e0e0e0;
-            display: inline-flex;
-            align-items: center;
-            margin: 5px;
-        }
-
-        .remove-department {
-            color: #dc3545;
-            margin-left: 5px;
-            font-weight: bold;
-            cursor: pointer;
-        }
-
         .modal {
             display: none;
             position: fixed;
@@ -417,194 +284,182 @@ try {
             height: 100%;
             background-color: rgba(0, 0, 0, 0.5);
             z-index: 1000;
+            align-items: center;
+            justify-content: center;
         }
-
         .modal-content {
             background-color: #fff;
-            margin: 10% auto;
             padding: 20px;
             width: 90%;
             max-width: 500px;
             border-radius: 8px;
+            position: relative;
         }
-
+        .modal-content h3 {
+            margin-top: 0;
+        }
         .close {
-            float: right;
+            position: absolute;
+            top: 10px;
+            right: 10px;
             font-size: 1.5em;
             cursor: pointer;
         }
-
-        .profile-pic-upload {
-            text-align: center;
-            margin-bottom: 15px;
-        }
-
-        .profile-pic-upload img {
-            width: 100px;
-            height: 100px;
-            border-radius: 50%;
-            object-fit: cover;
-        }
-
-        .cropper-popup {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.5);
-            z-index: 1001;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .cropper-container {
-            background-color: #fff;
-            padding: 20px;
-            border-radius: 8px;
-            max-width: 600px;
-        }
-
-        .cropper-container img {
-            max-width: 100%;
-        }
-
         .table-container {
-            margin-top: 20px;
+            position: relative;
         }
-
-        .toggle-buttons button {
-            padding: 8px 16px;
-            margin-right: 5px;
-        }
-
-        .toggle-buttons .active {
-            background-color: #007bff;
-            color: white;
-        }
-
-        table {
+        .user-table {
             width: 100%;
             border-collapse: collapse;
+            margin-top: 20px;
         }
-
-        th,
-        td {
-            padding: 10px;
+        .user-table th, .user-table td {
             border: 1px solid #ddd;
+            padding: 8px;
             text-align: left;
         }
-
-        th {
-            background-color: #f4f4f4;
+        .user-table th {
+            background-color: #3d3d3dff;
+            position: sticky;
+            top: 0;
+            z-index: 10;
         }
-
-        td img {
-            width: 50px;
-            height: 50px;
-            border-radius: 50%;
-            object-fit: cover;
-        }
-
-        .action-buttons a {
+        .action-buttons button {
             margin-right: 5px;
-        }
-
-        .edit-btn,
-        .delete-btn {
             padding: 5px 10px;
             border-radius: 4px;
+            cursor: pointer;
+            border: none;
         }
-
         .edit-btn {
             background-color: #007bff;
             color: white;
         }
-
         .delete-btn {
             background-color: #dc3545;
             color: white;
         }
+        .add-user-btn {
+            padding: 8px 16px;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-bottom: 20px;
+        }
+        .pagination {
+            position: sticky;
+            bottom: 0;
+            background-color: #fff;
+            padding: 10px;
+            border-top: 1px solid #ddd;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 10;
+        }
+        .pagination select, .pagination button {
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            cursor: pointer;
+        }
+        .pagination button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .pagination select:focus, .pagination button:focus {
+            outline: none;
+            border-color: #007bff;
+        }
+        .modal-content input, .modal-content select {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .modal-content select[multiple] {
+            height: 100px;
+        }
+        .modal-content button {
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            border: none;
+        }
+        .modal-content button[type="submit"] {
+            background-color: #28a745;
+            color: white;
+        }
+        .modal-content button[type="submit"][data-action="delete"] {
+            background-color: #dc3545;
+        }
+        .filter-container {
+            margin-bottom: 20px;
+        }
+        .filter-container select {
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            cursor: pointer;
+        }
+        .profile-pic-preview {
+            max-width: 200px;
+            max-height: 200px;
+            margin-top: 10px;
+            display: none;
+        }
+        .cropper-container {
+            max-width: 100%;
+            max-height: 300px;
+            margin-top: 10px;
+        }
+        .highlight-option {
+            animation: highlight 0.3s ease;
+        }
+        @keyframes highlight {
+            0% { background-color: #d4edda; }
+            100% { background-color: transparent; }
+        }
     </style>
 </head>
+<body class="admin-dashboard">
+    
+    <!-- Admin Sidebar -->
+    <?php
+        include 'admin_menu.php';
+    ?>
 
-<body>
-    <div class="sidebar">
-        <button class="toggle-btn" title="Toggle Sidebar" aria-label="Toggle Sidebar"><i class="fas fa-bars"></i></button>
-        <h2 class="sidebar-title">Admin Panel</h2>
-        <a href="dashboard.php" data-tooltip="Switch to Client View"><i class="fas fa-exchange-alt"></i><span class="link-text">Switch to Client View</span></a>
-        <a href="admin_dashboard.php" data-tooltip="Dashboard"><i class="fas fa-home"></i><span class="link-text">Dashboard</span></a>
-        <a href="admin_search.php" data-tooltip="View All Files"><i class="fas fa-search"></i><span class="link-text">View All Files</span></a>
-        <a href="user_management.php" class="active" data-tooltip="User Management"><i class="fas fa-users"></i><span class="link-text">User Managementaw</span></a>
-        <a href="department_management.php" data-tooltip="Department Management"><i class="fas fa-building"></i><span class="link-text">Department Management</span></a>
-        <a href="physical_storage_management.php" data-tooltip="Physical Storage"><i class="fas fa-archive"></i><span class="link-text">Physical Storage</span></a>
-        <a href="logout.php" class="logout-btn" data-tooltip="Logout"><i class="fas fa-sign-out-alt"></i><span class="link-text">Logout</span></a>
-    </div>
-
-    <div class="main-content sidebar-expanded">
+    <div class="main-content">
         <h2>User Management</h2>
-        <button id="open-modal-btn" class="open-modal-btn">Add User</button>
-        <?php if (!empty($error)): ?>
-            <p class="error"><?php echo htmlspecialchars($error, ENT_QUOTES, 'UTF-8'); ?></p>
+        <?php if ($successMessage): ?>
+            <p class="success"><?php echo sanitizeHTML($successMessage); ?></p>
         <?php endif; ?>
-        <div class="modal" id="user-modal">
-            <div class="modal-content">
-                <span class="close" aria-label="Close Modal">&times;</span>
-                <h2><?php echo isset($_GET['edit']) ? 'Edit User' : 'Add User'; ?></h2>
-                <form id="user-form" method="POST" action="user_management.php">
-                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8'); ?>">
-                    <input type="hidden" name="action" value="<?php echo isset($_GET['edit']) ? 'edit' : 'add'; ?>">
-                    <?php if (isset($_GET['edit'])): ?>
-                        <input type="hidden" name="user_id" value="<?php echo htmlspecialchars($_GET['edit'], ENT_QUOTES, 'UTF-8'); ?>">
-                    <?php endif; ?>
-                    <div class="profile-pic-upload">
-                        <img id="profile-pic-preview" src="placeholder.jpg" alt="Profile Picture">
-                        <input type="file" name="profile_pic" id="profile-pic-input" accept="image/*">
-                        <label for="profile-pic-input">Upload Profile Picture</label>
-                    </div>
-                    <label for="username">Username (Full Name):</label>
-                    <input type="text" name="username" id="username" placeholder="Username" required maxlength="255">
-                    <label for="password">Password:<?php echo isset($_GET['edit']) ? ' (Leave blank to keep unchanged)' : ''; ?></label>
-                    <input type="password" name="password" id="password" placeholder="Password" <?php echo isset($_GET['edit']) ? '' : 'required'; ?> minlength="8">
-                    <label for="position">Position (Numeric):</label>
-                    <input type="number" name="position" id="position" placeholder="Position" required min="0">
-                    <label for="role">Role:</label>
-                    <select name="role" id="role" required>
-                        <option value="">Select Role</option>
-                        <option value="admin">Admin</option>
-                        <option value="client">Client</option>
-                    </select>
-                    <div class="department-selection">
-                        <label>Departments (Required):</label>
-                        <input type="text" id="dept-search" placeholder="Search departments..." class="search-input">
-                        <div class="department-list">
-                            <?php foreach ($departments as $dept): ?>
-                                <div class="department-item" data-id="<?php echo htmlspecialchars($dept['id'], ENT_QUOTES, 'UTF-8'); ?>">
-                                    <span><?php echo htmlspecialchars($dept['name'], ENT_QUOTES, 'UTF-8'); ?></span>
-                                </div>
-                            <?php endforeach; ?>
-                        </div>
-                    </div>
-                    <div id="selected-departments" class="selected-departments"></div>
-                    <input type="hidden" name="departments" id="selected-departments-input">
-                    <input type="hidden" name="cropped_image" id="cropped-image-input">
-                    <button type="submit"><?php echo isset($_GET['edit']) ? 'Update User' : 'Add User'; ?></button>
-                </form>
-            </div>
+        <?php if ($errorMessage): ?>
+            <p class="error"><?php echo sanitizeHTML($errorMessage); ?></p>
+        <?php endif; ?>
+
+        <div class="filter-container">
+            <label for="role_filter">Filter by Role:</label>
+            <select id="role_filter" onchange="updateRoleFilter()">
+                <option value="" <?php echo $roleFilter === '' ? 'selected' : ''; ?>>All</option>
+                <option value="admin" <?php echo $roleFilter === 'admin' ? 'selected' : ''; ?>>Admin</option>
+                <option value="user" <?php echo $roleFilter === 'user' ? 'selected' : ''; ?>>User</option>
+                <option value="client" <?php echo $roleFilter === 'client' ? 'selected' : ''; ?>>Client</option>
+            </select>
         </div>
 
+        <button class="add-user-btn" onclick="openModal('add')">Add New User</button>
+
         <div class="table-container">
-            <div class="toggle-buttons">
-                <button id="toggle-all" class="active">All Users</button>
-                <button id="toggle-admins">Admins</button>
-                <button id="toggle-clients">Clients</button>
-            </div>
-            <table id="user-table">
+            <table class="user-table">
                 <thead>
                     <tr>
                         <th>Profile</th>
                         <th>Username</th>
+                        <th>Email</th>
                         <th>Position</th>
                         <th>Departments</th>
                         <th>Role</th>
@@ -612,319 +467,245 @@ try {
                     </tr>
                 </thead>
                 <tbody>
-                    <?php foreach ($users as $user): ?>
-                        <tr data-role="<?php echo htmlspecialchars($user['role'], ENT_QUOTES, 'UTF-8'); ?>">
-                            <td>
-                                <img src="<?php echo htmlspecialchars($user['profile_pic'] ? 'data:image/png;base64,' . base64_encode($user['profile_pic']) : 'placeholder.jpg', ENT_QUOTES, 'UTF-8'); ?>" alt="Profile">
-                            </td>
-                            <td><?php echo htmlspecialchars($user['username'], ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td><?php echo htmlspecialchars($user['position'], ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td><?php echo htmlspecialchars($user['department_names'] ?? 'No departments', ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td><?php echo htmlspecialchars($user['role'], ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td class="action-buttons">
-                                <a href="user_management.php?edit=<?php echo htmlspecialchars($user['id'], ENT_QUOTES, 'UTF-8'); ?>&csrf_token=<?php echo htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8'); ?>">
-                                    <button class="edit-btn">Edit</button>
-                                </a>
-                                <a href="user_management.php?delete=<?php echo htmlspecialchars($user['id'], ENT_QUOTES, 'UTF-8'); ?>&csrf_token=<?php echo htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8'); ?>" onclick="return confirm('Are you sure you want to delete this user?')">
-                                    <button class="delete-btn">Delete</button>
-                                </a>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
+                    <?php if (empty($paginatedUsers)): ?>
+                        <tr><td colspan="7">No users found.</td></tr>
+                    <?php else: ?>
+                        <?php foreach ($paginatedUsers as $user): ?>
+                            <tr>
+                                <td>
+                                    <?php if (!empty($user['profile_pic'])): ?>
+                                        <img src="data:image/jpeg;base64,<?php echo base64_encode($user['profile_pic']); ?>" alt="Profile" style="width: 50px; height: 50px; border-radius: 50%;">
+                                    <?php else: ?>
+                                        No Profile Picture
+                                    <?php endif; ?>
+                                </td>
+                                <td><?php echo sanitizeHTML($user['username']); ?></td>
+                                <td><?php echo sanitizeHTML($user['email']); ?></td>
+                                <td><?php echo sanitizeHTML($user['position']); ?></td>
+                                <td><?php echo sanitizeHTML($user['departments'] ?? 'None'); ?></td>
+                                <td><?php echo sanitizeHTML($user['role']); ?></td>
+                                <td class="action-buttons">
+                                    <button class="edit-btn" onclick='openModal("edit", <?php echo json_encode($user); ?>)'>Edit</button>
+                                    <button class="delete-btn" onclick='openModal("delete", <?php echo json_encode(['user_id' => $user['user_id'], 'username' => $user['username']]); ?>)'>Delete</button>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
                 </tbody>
             </table>
+
+            <!-- Pagination Controls -->
+            <div class="pagination">
+                <div>
+                    <label for="items_per_page">Items per page:</label>
+                    <select id="items_per_page" onchange="updateItemsPerPage()">
+                        <option value="5" <?php echo $itemsPerPage === 5 ? 'selected' : ''; ?>>5</option>
+                        <option value="10" <?php echo $itemsPerPage === 10 ? 'selected' : ''; ?>>10</option>
+                        <option value="20" <?php echo $itemsPerPage === 20 ? 'selected' : ''; ?>>20</option>
+                        <option value="-1" <?php echo $itemsPerPage === -1 ? 'selected' : ''; ?>>All</option>
+                    </select>
+                </div>
+                <div>
+                    <button onclick="goToPage(<?php echo $currentPage - 1; ?>)" <?php echo $currentPage <= 1 ? 'disabled' : ''; ?>>Previous</button>
+                    <span>Page <?php echo $currentPage; ?> of <?php echo $totalPages; ?></span>
+                    <button onclick="goToPage(<?php echo $currentPage + 1; ?>)" <?php echo $currentPage >= $totalPages ? 'disabled' : ''; ?>>Next</button>
+                </div>
+            </div>
         </div>
 
-        <div class="cropper-popup">
-            <div class="cropper-container">
-                <img id="cropper-image" />
-                <button id="crop-button">Crop Image</button>
-                <button id="cancel-button">Cancel</button>
+        <!-- Modal for Add/Edit/Delete -->
+        <div class="modal" id="user-modal">
+            <div class="modal-content">
+                <span class="close" onclick="closeModal()">&times;</span>
+                <h3 id="modal-title">User Action</h3>
+                <form id="user-form" method="POST" enctype="multipart/form-data">
+                    <input type="hidden" name="action" id="form-action">
+                    <input type="hidden" name="user_id" id="user_id">
+                    <input type="hidden" name="csrf_token" value="<?php echo $csrfToken; ?>">
+                    <div id="form-content">
+                        <!-- Dynamic form content will be injected here -->
+                    </div>
+                    <button type="submit" id="form-submit" data-action="">Submit</button>
+                </form>
             </div>
         </div>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.js" integrity="sha512-9K6N7sNnxO2y6Cw59kQ1GpqCYQ4vfV4tP7qFuAq0A8tI3b9u2Z9tI3K0xU7l01W4JZaG8jG+Ox49CD91F+x3r/g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script>
-        // Initialize DOM elements
-        const profilePicInput = document.getElementById('profile-pic-input');
-        const profilePicPreview = document.getElementById('profile-pic-preview');
-        const cropperPopup = document.querySelector('.cropper-popup');
-        const cropperImage = document.getElementById('cropper-image');
-        const cropButton = document.getElementById('crop-button');
-        const cancelButton = document.getElementById('cancel-button');
-        const croppedImageInput = document.getElementById('cropped-image-input');
-        const toggleAll = document.getElementById('toggle-all');
-        const toggleAdmins = document.getElementById('toggle-admins');
-        const toggleClients = document.getElementById('toggle-clients');
-        const userTableRows = document.querySelectorAll('#user-table tbody tr');
-        const modal = document.getElementById('user-modal');
-        const openModalBtn = document.getElementById('open-modal-btn');
-        const closeModal = modal.querySelector('.close');
-        const userForm = document.getElementById('user-form');
-        const deptSearch = document.getElementById('dept-search');
-        const departmentItems = document.querySelectorAll('.department-item');
-        const selectedDepartmentsContainer = document.getElementById('selected-departments');
-        const selectedDepartmentsInput = document.getElementById('selected-departments-input');
-        let selectedDepartments = new Set();
         let cropper = null;
 
-        // Handle profile picture upload and cropping
-        function initializeProfilePictureCropper() {
-            profilePicInput.addEventListener('change', function(event) {
-                const file = event.target.files[0];
+        function toggleSidebar() {
+            const sidebar = document.querySelector('.sidebar');
+            const mainContent = document.querySelector('.main-content');
+            sidebar.classList.toggle('minimized');
+            mainContent.classList.toggle('sidebar-minimized');
+        }
+
+        function openModal(action, data = {}) {
+            const modal = document.getElementById('user-modal');
+            const modalTitle = document.getElementById('modal-title');
+            const formAction = document.getElementById('form-action');
+            const formContent = document.getElementById('form-content');
+            const formSubmit = document.getElementById('form-submit');
+            const userId = document.getElementById('user_id');
+
+            modal.style.display = 'flex';
+            formAction.value = action === 'add' ? 'add_user' : action === 'edit' ? 'edit_user' : 'delete_user';
+            formSubmit.setAttribute('data-action', action);
+
+            if (action === 'delete') {
+                userId.value = data.user_id || '';
+                modalTitle.textContent = 'Delete User';
+                formContent.innerHTML = `
+                    <p>Are you sure you want to delete the user "${sanitizeHTML(data.username)}"?</p>
+                `;
+                formSubmit.textContent = 'Delete';
+                formSubmit.style.backgroundColor = '#dc3545';
+            } else {
+                userId.value = action === 'edit' ? data.user_id || '' : '';
+                modalTitle.textContent = action === 'add' ? 'Add New User' : 'Edit User';
+                const departments = action === 'edit' && data.departments ? data.departments.split(',') : [];
+                formContent.innerHTML = `
+                    <label for="username">Username:</label>
+                    <input type="text" id="username" name="username" value="${action === 'edit' ? sanitizeHTML(data.username || '') : ''}" required>
+                    <label for="email">Email:</label>
+                    <input type="email" id="email" name="email" value="${action === 'edit' ? sanitizeHTML(data.email || '') : ''}" required>
+                    <label for="password">Password${action === 'edit' ? ' (leave blank to keep unchanged)' : ''}:</label>
+                    <input type="password" id="password" name="password" ${action === 'add' ? 'required' : ''}>
+                    <label for="role">Role:</label>
+                    <select id="role" name="role" required>
+                        <option value="admin" ${action === 'edit' && data.role === 'admin' ? 'selected' : ''}>Admin</option>
+                        <option value="user" ${action === 'edit' && data.role === 'user' ? 'selected' : ''}>User</option>
+                        <option value="client" ${action === 'edit' && data.role === 'client' ? 'selected' : ''}>Client</option>
+                    </select>
+                    <label for="position">Position:</label>
+                    <input type="number" id="position" name="position" value="${action === 'edit' ? sanitizeHTML(data.position || '0') : '0'}" min="0" required>
+                    <label for="departments">Departments (Hold Ctrl/Cmd to select multiple):</label>
+                    <select id="departments" name="departments[]" multiple>
+                        <?php foreach ($departments as $dept): ?>
+                            <option value="<?php echo $dept['department_id']; ?>"
+                                ${action === 'edit' && departments.some(dept => dept.includes(<?php echo json_encode($dept['department_name']); ?>)) ? 'selected' : ''}>
+                                <?php echo sanitizeHTML($dept['department_name']); ?>
+                                <?php if ($dept['parent_department_id']): ?>
+                                    (Parent: <?php echo sanitizeHTML($departments[array_search($dept['parent_department_id'], array_column($departments, 'department_id'))]['department_name']); ?>)
+                                <?php endif; ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                    <label for="profile_pic">Profile Picture:</label>
+                    <input type="file" id="profile_pic" name="profile_pic" accept="image/jpeg,image/png">
+                    <div class="cropper-container" id="cropperContainer" style="display: none;">
+                        <img id="profilePicPreview" class="profile-pic-preview">
+                    </div>
+                `;
+                formSubmit.textContent = action === 'add' ? 'Add User' : 'Update User';
+                formSubmit.style.backgroundColor = '#28a745';
+                initializeCropper();
+                initializeDepartmentHighlight();
+            }
+        }
+
+        function initializeDepartmentHighlight() {
+            const departmentSelect = document.getElementById('departments');
+            departmentSelect.addEventListener('click', function(e) {
+                if (e.target.tagName === 'OPTION') {
+                    const option = e.target;
+                    option.classList.add('highlight-option');
+                    setTimeout(() => {
+                        option.classList.remove('highlight-option');
+                    }, 300); // Match animation duration
+                }
+            });
+        }
+
+        function closeModal() {
+            const modal = document.getElementById('user-modal');
+            modal.style.display = 'none';
+            if (cropper) {
+                cropper.destroy();
+                cropper = null;
+                document.getElementById('profilePicPreview').src = '';
+                document.getElementById('cropperContainer').style.display = 'none';
+            }
+        }
+
+        function initializeCropper() {
+            const input = document.getElementById('profile_pic');
+            const preview = document.getElementById('profilePicPreview');
+            const container = document.getElementById('cropperContainer');
+
+            input.addEventListener('change', function(e) {
+                const file = e.target.files[0];
                 if (file) {
-                    if (file.size > 1024 * 1024) {
-                        alert('Image size exceeds 1MB.');
-                        return;
-                    }
                     const reader = new FileReader();
-                    reader.onload = function(e) {
-                        cropperPopup.style.display = 'flex';
-                        cropperImage.src = e.target.result;
-                        if (cropper) cropper.destroy();
-                        cropper = new Cropper(cropperImage, {
+                    reader.onload = function(event) {
+                        preview.src = event.target.result;
+                        container.style.display = 'block';
+                        preview.style.display = 'block';
+
+                        if (cropper) {
+                            cropper.destroy();
+                        }
+
+                        cropper = new Cropper(preview, {
                             aspectRatio: 1,
                             viewMode: 1,
                             autoCropArea: 0.8,
+                            responsive: true,
+                            crop(event) {
+                                cropper.getCroppedCanvas({
+                                    width: 200,
+                                    height: 200,
+                                }).toBlob(function(blob) {
+                                    const file = new File([blob], input.files[0].name, { type: blob.type });
+                                    const dataTransfer = new DataTransfer();
+                                    dataTransfer.items.add(file);
+                                    input.files = dataTransfer.files;
+                                });
+                            }
                         });
                     };
                     reader.readAsDataURL(file);
                 }
             });
-
-            cropButton.addEventListener('click', function() {
-                if (cropper) {
-                    const croppedCanvas = cropper.getCroppedCanvas({
-                        width: 150,
-                        height: 150
-                    });
-                    const croppedImage = croppedCanvas.toDataURL('image/png');
-                    profilePicPreview.src = croppedImage;
-                    croppedImageInput.value = croppedImage;
-                    cropperPopup.style.display = 'none';
-                    cropper.destroy();
-                    cropper = null;
-                }
-            });
-
-            cancelButton.addEventListener('click', function() {
-                cropperPopup.style.display = 'none';
-                if (cropper) {
-                    cropper.destroy();
-                    cropper = null;
-                }
-                profilePicInput.value = '';
-            });
         }
 
-        // Handle modal visibility
-        function initializeModal() {
-            openModalBtn.addEventListener('click', () => {
-                modal.style.display = 'block';
-                resetForm();
-            });
+        function sanitizeHTML(str) {
+            const div = document.createElement('div');
+            div.textContent = str ?? '';
+            return div.innerHTML;
+        }
 
-            closeModal.addEventListener('click', () => {
-                modal.style.display = 'none';
-                resetForm();
-            });
+        function updateItemsPerPage() {
+            const itemsPerPage = document.getElementById('items_per_page').value;
+            const roleFilter = document.getElementById('role_filter').value;
+            window.location.href = `user_management.php?items_per_page=${itemsPerPage}&page=1&role_filter=${roleFilter}`;
+        }
+
+        function goToPage(page) {
+            const itemsPerPage = document.getElementById('items_per_page').value;
+            const roleFilter = document.getElementById('role_filter').value;
+            window.location.href = `user_management.php?items_per_page=${itemsPerPage}&page=${page}&role_filter=${roleFilter}`;
+        }
+
+        function updateRoleFilter() {
+            const roleFilter = document.getElementById('role_filter').value;
+            const itemsPerPage = document.getElementById('items_per_page').value;
+            window.location.href = `user_management.php?items_per_page=${itemsPerPage}&page=1&role_filter=${roleFilter}`;
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const sidebar = document.querySelector('.sidebar');
+            const mainContent = document.querySelector('.main-content');
+            mainContent.classList.add(sidebar.classList.contains('minimized') ? 'sidebar-minimized' : '');
 
             window.addEventListener('click', (event) => {
+                const modal = document.getElementById('user-modal');
                 if (event.target === modal) {
-                    modal.style.display = 'none';
-                    resetForm();
+                    closeModal();
                 }
             });
-        }
-
-        // Handle department selection
-        function initializeDepartmentSelection() {
-            deptSearch.addEventListener('input', function() {
-                const query = this.value.toLowerCase();
-                departmentItems.forEach(item => {
-                    const name = item.querySelector('span').textContent.toLowerCase();
-                    item.style.display = name.includes(query) ? 'block' : 'none';
-                });
-            });
-
-            departmentItems.forEach(item => {
-                item.addEventListener('click', () => {
-                    const deptId = item.getAttribute('data-id');
-                    toggleDepartmentSelection(deptId, item);
-                });
-            });
-        }
-
-        function toggleDepartmentSelection(deptId, item) {
-            if (selectedDepartments.has(deptId)) {
-                selectedDepartments.delete(deptId);
-                item.classList.remove('selected');
-                selectedDepartmentsContainer.querySelector(`[data-department-id="${deptId}"]`)?.remove();
-            } else {
-                selectedDepartments.add(deptId);
-                item.classList.add('selected');
-                const selectedItem = document.createElement('div');
-                selectedItem.className = 'selected-department';
-                selectedItem.setAttribute('data-department-id', deptId);
-                selectedItem.innerHTML = `${item.querySelector('span').textContent} <span class="remove-department">×</span>`;
-                selectedDepartmentsContainer.appendChild(selectedItem);
-
-                selectedItem.querySelector('.remove-department').addEventListener('click', () => {
-                    selectedDepartments.delete(deptId);
-                    item.classList.remove('selected');
-                    selectedItem.remove();
-                    updateSelectedDepartmentsInput();
-                });
-            }
-            updateSelectedDepartmentsInput();
-        }
-
-        function updateSelectedDepartmentsInput() {
-            selectedDepartmentsInput.value = Array.from(selectedDepartments).join(',');
-        }
-
-        function resetForm() {
-            selectedDepartments.clear();
-            departmentItems.forEach(item => item.classList.remove('selected'));
-            selectedDepartmentsContainer.innerHTML = '';
-            selectedDepartmentsInput.value = '';
-            userForm.reset();
-            profilePicPreview.src = 'placeholder.jpg';
-            croppedImageInput.value = '';
-        }
-
-        // Handle table filtering
-        function initializeTableFiltering() {
-            function filterTable(role) {
-                userTableRows.forEach(row => {
-                    row.style.display = (role === 'all' || row.getAttribute('data-role') === role) ? '' : 'none';
-                });
-            }
-
-            toggleAll.addEventListener('click', () => {
-                filterTable('all');
-                toggleAll.classList.add('active');
-                toggleAdmins.classList.remove('active');
-                toggleClients.classList.remove('active');
-            });
-
-            toggleAdmins.addEventListener('click', () => {
-                filterTable('admin');
-                toggleAll.classList.remove('active');
-                toggleAdmins.classList.add('active');
-                toggleClients.classList.remove('active');
-            });
-
-            toggleClients.addEventListener('click', () => {
-                filterTable('client');
-                toggleAll.classList.remove('active');
-                toggleAdmins.classList.remove('active');
-                toggleClients.classList.add('active');
-            });
-        }
-
-        // Handle form submission via AJAX
-        function initializeFormSubmission() {
-            userForm.addEventListener('submit', function(event) {
-                event.preventDefault();
-                const formData = new FormData(this);
-                fetch('user_management.php', {
-                        method: 'POST',
-                        body: formData
-                    })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.success) {
-                            alert(data.message);
-                            window.location.href = 'user_management.php';
-                        } else {
-                            const errorElement = document.createElement('p');
-                            errorElement.className = 'error';
-                            errorElement.textContent = data.message;
-                            modal.querySelector('.modal-content').insertBefore(errorElement, userForm);
-                            setTimeout(() => errorElement.remove(), 5000);
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Form submission error:', error);
-                        const errorElement = document.createElement('p');
-                        errorElement.className = 'error';
-                        errorElement.textContent = 'An error occurred while processing the request.';
-                        modal.querySelector('.modal-content').insertBefore(errorElement, userForm);
-                        setTimeout(() => errorElement.remove(), 5000);
-                    });
-            });
-        }
-
-        // Prefill form for editing
-        function initializeEditPrefill() {
-            <?php if (isset($_GET['edit'])): ?>
-                modal.style.display = 'block';
-                fetch(`get_user_data.php?user_id=<?php echo htmlspecialchars($_GET['edit'], ENT_QUOTES, 'UTF-8'); ?>&csrf_token=<?php echo htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8'); ?>`)
-                    .then(response => response.json())
-                    .then(data => {
-                        console.log('Fetch user data response:', data);
-                        if (data.success) {
-                            const user = data.data.user;
-                            document.getElementById('username').value = user.username;
-                            document.getElementById('position').value = user.position;
-                            document.getElementById('role').value = user.role;
-                            if (user.profile_pic) {
-                                profilePicPreview.src = `data:image/png;base64,${user.profile_pic}`;
-                            }
-
-                            user.departments.forEach(dept => {
-                                const item = document.querySelector(`.department-item[data-id="${dept.department_id}"]`);
-                                if (item) {
-                                    selectedDepartments.add(dept.department_id);
-                                    item.classList.add('selected');
-                                    const selectedItem = document.createElement('div');
-                                    selectedItem.className = 'selected-department';
-                                    selectedItem.setAttribute('data-department-id', dept.department_id);
-                                    selectedItem.innerHTML = `${item.querySelector('span').textContent} <span class="remove-department">×</span>`;
-                                    selectedDepartmentsContainer.appendChild(selectedItem);
-                                    selectedItem.querySelector('.remove-department').addEventListener('click', () => {
-                                        selectedDepartments.delete(dept.department_id);
-                                        item.classList.remove('selected');
-                                        selectedItem.remove();
-                                        updateSelectedDepartmentsInput();
-                                    });
-                                }
-                            });
-
-                            updateSelectedDepartmentsInput();
-                        } else {
-                            alert('Failed to load user data: ' + data.message);
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error fetching user data:', error);
-                        alert('An error occurred while loading user data.');
-                    });
-            <?php endif; ?>
-        }
-
-        // Initialize sidebar toggle
-        function initializeSidebarToggle() {
-            document.querySelector('.toggle-btn').addEventListener('click', () => {
-                document.querySelector('.sidebar').classList.toggle('minimized');
-                document.querySelector('.main-content').classList.toggle('sidebar-expanded');
-                document.querySelector('.main-content').classList.toggle('sidebar-minimized');
-            });
-        }
-
-        // Initialize all functionality
-        document.addEventListener('DOMContentLoaded', () => {
-            initializeProfilePictureCropper();
-            initializeModal();
-            initializeDepartmentSelection();
-            initializeTableFiltering();
-            initializeFormSubmission();
-            initializeEditPrefill();
-            initializeSidebarToggle();
         });
     </script>
 </body>
-
 </html>

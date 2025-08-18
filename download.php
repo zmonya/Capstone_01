@@ -1,68 +1,110 @@
 <?php
-session_start();
-require 'db_connection.php';
+// Include the Dompdf autoload file
+require 'vendor/autoload.php';
 
-if (!isset($_SESSION['user_id'])) {
-    header('Location: login.php');
-    exit;
+use Dompdf\Dompdf;
+use Dompdf\Options;
+
+// Decode the incoming JSON data
+$data = json_decode(file_get_contents('php://input'), true);
+
+$chartType = $data['chartType'];
+$chartData = $data['chartData'];
+$chartImage = $data['chartImage'];
+
+// Create a new Dompdf instance
+$options = new Options();
+$options->set('isRemoteEnabled', true); // Enable remote images (e.g., base64 images)
+$dompdf = new Dompdf($options);
+
+// HTML content for the PDF
+$html = '
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>' . $chartType . ' Report</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 20px; 
+        }
+        h1 { 
+            font-size: 18px; 
+            font-weight: bold; 
+            text-align: center; 
+        }
+        h2 {
+            font-size: 14px;
+            margin-top: 20px;
+        }
+        table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            margin-top: 20px; 
+            border: 1px solid #000000; /* Explicitly set table border */
+        }
+        th, td { 
+            border: 1px solid #000000 !important; /* Force border with !important */
+            padding: 8px; 
+            text-align: left; 
+        }
+        th { 
+            background-color: #f2f2f2; 
+            font-weight: bold; 
+        }
+        img { 
+            max-width: 100%; 
+            height: auto; 
+            display: block; 
+            margin: 10px auto; 
+        }
+    </style>
+</head>
+<body>
+    <h1>' . $chartType . ' Report</h1>
+    <img src="' . $chartImage . '" alt="Chart Image">
+    <h2>Data Table</h2>
+    <table>
+        <thead>
+            <tr>';
+
+if ($chartType === 'FileUploadTrends') {
+    $html .= '<th>Upload Day</th><th>Upload Count</th>';
+} else if ($chartType === 'FileDistribution') {
+    $html .= '<th>Document Type</th><th>File Count</th>';
 }
 
-$fileId = isset($_GET['file_id']) ? intval($_GET['file_id']) : 0;
-$userId = $_SESSION['user_id'];
+$html .= '
+            </tr>
+        </thead>
+        <tbody>';
 
-// Fetch file information
-$stmt = $pdo->prepare("
-    SELECT f.*, u.username as owner_name
-    FROM files f
-    LEFT JOIN users u ON f.user_id = u.user_id
-    WHERE f.file_id = ? AND f.file_status != 'deleted'
-");
-$stmt->execute([$fileId]);
-$file = $stmt->fetch(PDO::FETCH_ASSOC);
-
-if (!$file) {
-    die("File not found or access denied.");
+foreach ($chartData as $row) {
+    $html .= '<tr>';
+    if ($chartType === 'FileUploadTrends') {
+        $html .= '<td>' . $row['upload_day'] . '</td><td>' . $row['upload_count'] . '</td>';
+    } else if ($chartType === 'FileDistribution') {
+        $html .= '<td>' . $row['document_type'] . '</td><td>' . $row['file_count'] . '</td>';
+    }
+    $html .= '</tr>';
 }
 
-// Check if user has access to this file
-$hasAccess = false;
-if ($file['user_id'] == $userId) {
-    $hasAccess = true;
-} else {
-    $stmt = $pdo->prepare("
-        SELECT COUNT(*) FROM transactions 
-        WHERE file_id = ? AND user_id = ? AND transaction_type = 'file_sent' AND description IN ('pending', 'accepted')
-    ");
-    $stmt->execute([$fileId, $userId]);
-    $hasAccess = $stmt->fetchColumn() > 0;
-}
+$html .= '
+        </tbody>
+    </table>
+</body>
+</html>';
 
-if (!$hasAccess) {
-    die("You don't have permission to download this file.");
-}
+// Load HTML content into Dompdf
+$dompdf->loadHtml($html);
 
-$filePath = 'uploads/' . $file['file_path'];
-$fileName = $file['file_name'];
+// Set paper size and orientation
+$dompdf->setPaper('A4', 'portrait');
 
-if (!file_exists($filePath)) {
-    die("File not found on server.");
-}
+// Render the PDF
+$dompdf->render();
 
-// Log the download action
-logActivity($userId, $fileId, 'file_download', 'File downloaded');
-
-// Set headers for file download
-header('Content-Type: application/octet-stream');
-header('Content-Disposition: attachment; filename="' . $fileName . '"');
-header('Content-Length: ' . filesize($filePath));
-header('Cache-Control: private, max-age=0, must-revalidate');
-header('Pragma: public');
-
-// Clear output buffer
-ob_clean();
-flush();
-
-// Read and output the file
-readfile($filePath);
-exit;
-?>
+// Output the PDF for download
+$dompdf->stream($chartType . '_Report.pdf', ['Attachment' => true]);

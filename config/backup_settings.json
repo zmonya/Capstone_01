@@ -1,6 +1,6 @@
 {
-    "backup_hour": 2,
-    "backup_minute": 0,
-    "backup_date": "2025-08-16",
-    "last_backup": "2025-08-15 21:45:07"
+    "backup_hour": 0,
+    "backup_minute": 20,
+    "backup_date": "2025-08-20",
+    "last_backup": "2025-08-19 00:20:00"
 }

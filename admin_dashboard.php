@@ -228,69 +228,22 @@ $accessHistoryStmt = executeQuery($pdo, "
     WHERE t.transaction_type = 'accept'
     ORDER BY t.transaction_time DESC");
 $accessHistory = $accessHistoryStmt ? $accessHistoryStmt->fetchAll(PDO::FETCH_ASSOC) : [];
-
 ?>
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Dashboard - ArcHive</title>
-    <link rel="stylesheet" href="style/admin-interface.css">
-    <link rel="stylesheet" href="style/admin-sidebar.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-</head>
-
+    <?php
+        include 'admin_head.php';
+    ?>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+</head>   
 
 <body class="admin-dashboard">
-    <!-- 
-    <div class="sidebar">
-        <button class="toggle-btn" title="Toggle Sidebar">
-            <i class="fas fa-bars"></i>
-        </button>
-        <h2 class="sidebar-title">Admin Panel</h2>
-        <a href="dashboard.php" class="client-btn">
-            <i class="fas fa-exchange-alt"></i>
-            <span class="link-text">Switch to Client View</span>
-        </a>
-        <a href="admin_dashboard.php" class="active">
-            <i class="fas fa-home"></i>
-            <span class="link-text">Dashboard</span>
-        </a>
-        <a href="admin_search.php">
-            <i class="fas fa-search"></i>
-            <span class="link-text">View All Files</span>
-        </a>
-        <a href="user_management.php">
-            <i class="fas fa-users"></i>
-            <span class="link-text">User Management</span>
-        </a>
-        <a href="department_management.php">
-            <i class="fas fa-building"></i>
-            <span class="link-text">Department Management</span>
-        </a>
-        <a href="physical_storage_management.php">
-            <i class="fas fa-archive"></i>
-            <span class="link-text">Physical Storage</span>
-        </a>
-        <a href="document_type_management.php">
-            <i class="fas fa-file-alt"></i>
-            <span class="link-text">Document Type Management</span>
-        </a>
-        <a href="backup.php">
-            <i class="fas fa-file-alt"></i>
-            <span class="link-text">System Backup</span>
-            <a href="logout.php" class="logout-btn">
-                <i class="fas fa-sign-out-alt"></i>
-                <span class="link-text">Logout</span>
-            </a>
-    </div>
- -->
-    
-<?php
-include 'steven.php';
-?>
+    <?php
+        include 'admin_menu.php';
+    ?>
 
     <div class="main-content">
         <h2>Welcome, <?php echo sanitizeHTML($admin['Username']); ?>!</h2>
@@ -320,76 +273,85 @@ include 'steven.php';
             <div class="chart-container" data-chart-type="FileUploadTrends">
                 <h3>File Upload Trends (Last 7 Days)</h3>
                 <canvas id="fileUploadTrendsChart"></canvas>
-                <div class="chart-data-table" style="display: none;"></div>
                 <div class="chart-actions" style="text-align: right; margin-bottom: 10px;">
                     <button onclick="generateReport('FileUploadTrends')">Print Report</button>
-                    <button onclick="downloadReport('FileUploadTrends')">Download Report</button>
+                    <button onclick="openDownloadModal('FileUploadTrends')">Download Report</button>
                 </div>
             </div>
             <div class="chart-container" data-chart-type="FileDistribution">
                 <h3>File Distribution by Document Type</h3>
                 <canvas id="fileDistributionChart"></canvas>
-                <div class="chart-data-table" style="display: none;"></div>
                 <div class="chart-actions" style="text-align: right; margin-bottom: 10px;">
                     <button onclick="generateReport('FileDistribution')">Print Report</button>
-                    <button onclick="downloadReport('FileDistribution')">Download Report</button>
+                    <button onclick="openDownloadModal('FileDistribution')">Download Report</button>
                 </div>
             </div>
             <div class="chart-container" data-chart-type="UsersPerDepartment">
                 <h3>Users Per Department</h3>
                 <canvas id="usersPerDepartmentChart"></canvas>
-                <div class="chart-data-table" style="display: none;"></div>
                 <div class="chart-actions" style="text-align: right; margin-bottom: 10px;">
                     <button onclick="generateReport('UsersPerDepartment')">Print Report</button>
-                    <button onclick="downloadReport('UsersPerDepartment')">Download Report</button>
+                    <button onclick="openDownloadModal('UsersPerDepartment')">Download Report</button>
                 </div>
             </div>
             <div class="chart-container" data-chart-type="DocumentCopies">
                 <h3>Document Copies Details</h3>
                 <canvas id="documentCopiesChart"></canvas>
-                <div class="chart-data-table" style="display: none;"></div>
                 <div class="chart-actions" style="text-align: right; margin-bottom: 10px;">
                     <button onclick="generateReport('DocumentCopies')">Print Report</button>
-                    <button onclick="downloadReport('DocumentCopies')">Download Report</button>
+                    <button onclick="openDownloadModal('DocumentCopies')">Download Report</button>
                 </div>
             </div>
             <div class="chart-container" data-chart-type="PendingRequests">
                 <h3>Pending Requests</h3>
-                <div class="chart-data-table"></div>
                 <div class="chart-actions" style="text-align: right; margin-bottom: 10px;">
                     <button onclick="generateReport('PendingRequests')">Print Report</button>
-                    <button onclick="downloadReport('PendingRequests')">Download Report</button>
+                    <button onclick="openDownloadModal('PendingRequests')">Download Report</button>
                 </div>
             </div>
             <div class="chart-container" data-chart-type="RetrievalHistory">
                 <h3>Retrieval History</h3>
-                <div class="chart-data-table">
-                    <div class="chart-actions" style="text-align: right; margin-bottom: 10px;">
-                        <button onclick="generateReport('RetrievalHistory')">Print Report</button>
-                        <button onclick="downloadReport('RetrievalHistory')">Download Report</button>
-                    </div>
-                </div>
                 <div class="chart-actions" style="text-align: right; margin-bottom: 10px;">
                     <button onclick="generateReport('RetrievalHistory')">Print Report</button>
-                    <button onclick="downloadReport('RetrievalHistory')">Download Report</button>
+                    <button onclick="openDownloadModal('RetrievalHistory')">Download Report</button>
                 </div>
             </div>
             <div class="chart-container" data-chart-type="AccessHistory">
                 <h3>Access History</h3>
-                <div class="chart-data-table"></div>
                 <div class="chart-actions" style="text-align: right; margin-bottom: 10px;">
                     <button onclick="generateReport('AccessHistory')">Print Report</button>
-                    <button onclick="downloadReport('AccessHistory')">Download Report</button>
+                    <button onclick="openDownloadModal('AccessHistory')">Download Report</button>
                 </div>
             </div>
 
+            <div class="modal-overlay" id="dataTableModal" style="display: none;">
+                <div class="modal-content">
+                    <button class="modal-close" onclick="closeModal()">×</button>
+                    <h3 id="modalTitle"></h3>
+                    <div class="pagination-controls" style="margin-bottom: 10px;">
+                        <label for="itemsPerPage">Items per page:</label>
+                        <select id="itemsPerPage" onchange="updatePagination()">
+                            <option value="5">5</option>
+                            <option value="10">10</option>
+                            <option value="20">20</option>
+                            <option value="all">All</option>
+                        </select>
+                        <button onclick="previousPage()" id="prevPage" disabled>Previous</button>
+                        <span id="pageInfo"></span>
+                        <button onclick="nextPage()" id="nextPage">Next</button>
+                    </div>
+                    <div id="modalTable" style="overflow-x: auto;"></div>
+                </div>
+            </div>
 
-            <div class="popup-overlay" id="popupOverlay">
-                <div class="popup-content" id="popupContent">
-                    <button class="popup-close" onclick="closePopup()">×</button>
-                    <h3 id="popupTitle"></h3>
-                    <canvas id="popupChart" style="display: none;"></canvas>
-                    <div id="popupTable"></div>
+            <div class="modal-overlay" id="downloadFormatModal" style="display: none;">
+                <div class="modal-content">
+                    <button class="modal-close" onclick="closeDownloadModal()">×</button>
+                    <h3 id="downloadModalTitle">Select Download Format</h3>
+                    <div class="download-options" style="text-align: center; margin-top: 20px;">
+                        <button onclick="downloadReport(currentChartType, 'csv')">Download as CSV</button>
+                        <button onclick="downloadReport(currentChartType, 'pdf')">Download as PDF</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -409,6 +371,12 @@ include 'steven.php';
                 div.textContent = str ?? '';
                 return div.innerHTML;
             }
+
+            // Pagination variables
+            let currentPage = 1;
+            let itemsPerPage = 5;
+            let currentData = [];
+            let currentChartType = '';
 
             // Initialize charts
             function initializeCharts() {
@@ -606,18 +574,15 @@ include 'steven.php';
                 }
             }
 
-            // Initialize data tables for expandable chart containers
-            function initializeDataTables() {
-                const chartContainers = document.querySelectorAll('.chart-container');
-                chartContainers.forEach(container => {
-                    const chartType = container.getAttribute('data-chart-type');
-                    let tableContent = '';
-                    let data;
+            // Generate table content with pagination
+            function generateTableContent(chartType, page = 1, itemsPerPage = 5) {
+                let tableContent = '';
+                let data;
 
-                    switch (chartType) {
-                        case 'FileUploadTrends':
-                            data = fileUploadTrends;
-                            tableContent = data.length > 0 ? `
+                switch (chartType) {
+                    case 'FileUploadTrends':
+                        data = fileUploadTrends;
+                        tableContent = data.length > 0 ? `
                             <table class="chart-data-table">
                                 <thead>
                                     <tr>
@@ -630,7 +595,7 @@ include 'steven.php';
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${data.map(entry => `
+                                    ${data.slice((page - 1) * itemsPerPage, page * itemsPerPage).map(entry => `
                                         <tr>
                                             <td>${sanitizeHTML(entry.document_name)}</td>
                                             <td>${sanitizeHTML(entry.document_type)}</td>
@@ -643,10 +608,10 @@ include 'steven.php';
                                 </tbody>
                             </table>
                         ` : '<p>No data available.</p>';
-                            break;
-                        case 'FileDistribution':
-                            data = fileDistribution;
-                            tableContent = data.length > 0 ? `
+                        break;
+                    case 'FileDistribution':
+                        data = fileDistribution;
+                        tableContent = data.length > 0 ? `
                             <table class="chart-data-table">
                                 <thead>
                                     <tr>
@@ -660,7 +625,7 @@ include 'steven.php';
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${data.map(entry => `
+                                    ${data.slice((page - 1) * itemsPerPage, page * itemsPerPage).map(entry => `
                                         <tr>
                                             <td>${sanitizeHTML(entry.document_name)}</td>
                                             <td>${sanitizeHTML(entry.document_type)}</td>
@@ -674,10 +639,10 @@ include 'steven.php';
                                 </tbody>
                             </table>
                         ` : '<p>No data available.</p>';
-                            break;
-                        case 'UsersPerDepartment':
-                            data = usersPerDepartment;
-                            tableContent = data.length > 0 ? `
+                        break;
+                    case 'UsersPerDepartment':
+                        data = usersPerDepartment;
+                        tableContent = data.length > 0 ? `
                             <table class="chart-data-table">
                                 <thead>
                                     <tr>
@@ -686,7 +651,7 @@ include 'steven.php';
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${data.map(entry => `
+                                    ${data.slice((page - 1) * itemsPerPage, page * itemsPerPage).map(entry => `
                                         <tr>
                                             <td>${sanitizeHTML(entry.department_name)}</td>
                                             <td>${sanitizeHTML(entry.user_count.toString())}</td>
@@ -695,10 +660,10 @@ include 'steven.php';
                                 </tbody>
                             </table>
                         ` : '<p>No data available.</p>';
-                            break;
-                        case 'DocumentCopies':
-                            data = documentCopies;
-                            tableContent = data.length > 0 ? `
+                        break;
+                    case 'DocumentCopies':
+                        data = documentCopies;
+                        tableContent = data.length > 0 ? `
                             <table class="chart-data-table">
                                 <thead>
                                     <tr>
@@ -709,7 +674,7 @@ include 'steven.php';
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${data.map(entry => `
+                                    ${data.slice((page - 1) * itemsPerPage, page * itemsPerPage).map(entry => `
                                         <tr>
                                             <td>${sanitizeHTML(entry.file_name)}</td>
                                             <td>${sanitizeHTML(entry.copy_count.toString())}</td>
@@ -720,10 +685,10 @@ include 'steven.php';
                                 </tbody>
                             </table>
                         ` : '<p>No data available.</p>';
-                            break;
-                        case 'PendingRequests':
-                            data = pendingRequestsDetails;
-                            tableContent = data.length > 0 ? `
+                        break;
+                    case 'PendingRequests':
+                        data = pendingRequestsDetails;
+                        tableContent = data.length > 0 ? `
                             <table class="chart-data-table">
                                 <thead>
                                     <tr>
@@ -734,7 +699,7 @@ include 'steven.php';
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${data.map(entry => `
+                                    ${data.slice((page - 1) * itemsPerPage, page * itemsPerPage).map(entry => `
                                         <tr>
                                             <td>${sanitizeHTML(entry.file_name)}</td>
                                             <td>${sanitizeHTML(entry.requester_name)}</td>
@@ -745,10 +710,10 @@ include 'steven.php';
                                 </tbody>
                             </table>
                         ` : '<p>No data available.</p>';
-                            break;
-                        case 'RetrievalHistory':
-                            data = retrievalHistory;
-                            tableContent = data.length > 0 ? `
+                        break;
+                    case 'RetrievalHistory':
+                        data = retrievalHistory;
+                        tableContent = data.length > 0 ? `
                             <table class="chart-data-table">
                                 <thead>
                                     <tr>
@@ -763,7 +728,7 @@ include 'steven.php';
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${data.map(entry => `
+                                    ${data.slice((page - 1) * itemsPerPage, page * itemsPerPage).map(entry => `
                                         <tr>
                                             <td>${sanitizeHTML(entry.transaction_id.toString())}</td>
                                             <td>${sanitizeHTML(entry.type)}</td>
@@ -778,10 +743,10 @@ include 'steven.php';
                                 </tbody>
                             </table>
                         ` : '<p>No data available.</p>';
-                            break;
-                        case 'AccessHistory':
-                            data = accessHistory;
-                            tableContent = data.length > 0 ? `
+                        break;
+                    case 'AccessHistory':
+                        data = accessHistory;
+                        tableContent = data.length > 0 ? `
                             <table class="chart-data-table">
                                 <thead>
                                     <tr>
@@ -794,7 +759,7 @@ include 'steven.php';
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${data.map(entry => `
+                                    ${data.slice((page - 1) * itemsPerPage, page * itemsPerPage).map(entry => `
                                         <tr>
                                             <td>${sanitizeHTML(entry.transaction_id.toString())}</td>
                                             <td>${new Date(entry.time).toLocaleString()}</td>
@@ -807,78 +772,102 @@ include 'steven.php';
                                 </tbody>
                             </table>
                         ` : '<p>No data available.</p>';
-                            break;
-                    }
-                    container.querySelector('.chart-data-table').innerHTML = tableContent;
-                });
+                        break;
+                }
+                currentData = data;
+                return tableContent;
             }
 
-            // Toggle chart data table and open pop-up on click
-            document.querySelectorAll('.chart-container').forEach(container => {
-                container.addEventListener('click', (e) => {
-                    // Ignore clicks on buttons or within tables
-                    if (e.target.tagName === 'BUTTON' || e.target.closest('.chart-data-table') || e.target.closest('.chart-actions')) return;
+            // Update pagination controls
+            function updatePagination() {
+                const itemsPerPageSelect = document.getElementById('itemsPerPage');
+                itemsPerPage = itemsPerPageSelect.value === 'all' ? currentData.length : parseInt(itemsPerPageSelect.value);
+                currentPage = 1;
+                renderTable();
+            }
 
-                    // Toggle inline table
-                    const dataTable = container.querySelector('.chart-data-table');
-                    dataTable.style.display = dataTable.style.display === 'none' ? 'block' : 'none';
+            // Go to previous page
+            function previousPage() {
+                if (currentPage > 1) {
+                    currentPage--;
+                    renderTable();
+                }
+            }
 
-                    // Open pop-up
-                    openPopup(container);
-                });
-            });
+            // Go to next page
+            function nextPage() {
+                const maxPage = Math.ceil(currentData.length / itemsPerPage);
+                if (currentPage < maxPage) {
+                    currentPage++;
+                    renderTable();
+                }
+            }
 
-            // Open pop-up with chart and table
-            function openPopup(container) {
+            // Render table with pagination
+            function renderTable() {
+                const modalTable = document.getElementById('modalTable');
+                modalTable.innerHTML = generateTableContent(currentChartType, currentPage, itemsPerPage);
+
+                const prevButton = document.getElementById('prevPage');
+                const nextButton = document.getElementById('nextPage');
+                const pageInfo = document.getElementById('pageInfo');
+
+                const maxPage = Math.ceil(currentData.length / itemsPerPage);
+                prevButton.disabled = currentPage === 1;
+                nextButton.disabled = currentPage === maxPage || currentData.length === 0;
+                pageInfo.textContent = `Page ${currentPage} of ${maxPage || 1}`;
+            }
+
+            // Open modal with table
+            function openModal(container) {
                 const chartType = container.getAttribute('data-chart-type');
-                const popupOverlay = document.getElementById('popupOverlay');
-                const popupContent = document.getElementById('popupContent');
-                const popupTitle = document.getElementById('popupTitle');
-                const popupChart = document.getElementById('popupChart');
-                const popupTable = document.getElementById('popupTable');
+                currentChartType = chartType;
+                currentPage = 1;
+                const modal = document.getElementById('dataTableModal');
+                const modalTitle = document.getElementById('modalTitle');
 
                 // Set title
-                popupTitle.textContent = container.querySelector('h3').textContent;
+                modalTitle.textContent = container.querySelector('h3').textContent;
 
-                // Copy table content
-                const tableContent = container.querySelector('.chart-data-table').innerHTML;
-                popupTable.innerHTML = tableContent;
+                // Render table
+                renderTable();
 
-                // Handle chart (if applicable)
-                const canvas = container.querySelector('canvas');
-                popupChart.style.display = canvas ? 'block' : 'none';
-                if (canvas) {
-                    const originalChart = Chart.getChart(canvas.id);
-                    if (originalChart) {
-                        popupChart.width = canvas.width;
-                        popupChart.height = canvas.height;
-                        new Chart(popupChart, {
-                            type: originalChart.config.type,
-                            data: originalChart.config.data,
-                            options: {
-                                ...originalChart.config.options,
-                                responsive: true,
-                                maintainAspectRatio: false
-                            }
-                        });
-                    }
-                }
-
-                // Show pop-up
-                popupOverlay.style.display = 'flex';
+                // Show modal
+                modal.style.display = 'flex';
             }
 
-            // Close pop-up
-            function closePopup() {
-                const popupOverlay = document.getElementById('popupOverlay');
-                const popupChart = document.getElementById('popupChart');
-                popupOverlay.style.display = 'none';
-                popupChart.style.display = 'none';
-                // Destroy existing chart to prevent memory leaks
-                const chartInstance = Chart.getChart(popupChart);
-                if (chartInstance) chartInstance.destroy();
-                popupChart.getContext('2d').clearRect(0, 0, popupChart.width, popupChart.height);
+            // Close modal
+            function closeModal() {
+                const modal = document.getElementById('dataTableModal');
+                modal.style.display = 'none';
+                document.getElementById('modalTable').innerHTML = '';
             }
+
+            // Open download format modal
+            function openDownloadModal(chartType) {
+                currentChartType = chartType;
+                const modal = document.getElementById('downloadFormatModal');
+                const modalTitle = document.getElementById('downloadModalTitle');
+                modalTitle.textContent = `Select Download Format for ${chartType} Report`;
+                modal.style.display = 'flex';
+            }
+
+            // Close download format modal
+            function closeDownloadModal() {
+                const modal = document.getElementById('downloadFormatModal');
+                modal.style.display = 'none';
+            }
+
+            // Handle chart clicks to open modal
+            document.querySelectorAll('.chart-container').forEach(container => {
+                container.addEventListener('click', (e) => {
+                    // Ignore clicks on buttons or within chart-actions
+                    if (e.target.tagName === 'BUTTON' || e.target.closest('.chart-actions')) return;
+
+                    // Open modal with table
+                    openModal(container);
+                });
+            });
 
             // Generate printable report
             function generateReport(chartType) {
@@ -979,8 +968,7 @@ include 'steven.php';
                         break;
                 }
 
-                const printWindow = window.open('', '_blank');
-                printWindow.document.write(`
+                const reportContent = `
                 <html>
                     <head>
                         <title>${chartType} Report - ArcHive</title>
@@ -1104,96 +1092,106 @@ include 'steven.php';
                         </table>
                     </body>
                 </html>
-            `);
-
+                `;
+                const printWindow = window.open('', '_blank');
+                printWindow.document.write(reportContent);
                 printWindow.document.close();
                 printWindow.onload = function() {
                     printWindow.focus();
                     printWindow.print();
                 };
+                return reportContent;
             }
 
-            // Initialize charts and tables on page load
-            document.addEventListener('DOMContentLoaded', () => {
-                initializeCharts();
-                initializeDataTables();
-                // Update main-content class based on sidebar state
-                const sidebar = document.querySelector('.sidebar');
-                const mainContent = document.querySelector('.main-content');
-                mainContent.classList.add(sidebar.classList.contains('minimized') ? 'sidebar-minimized' : 'sidebar-expanded');
-            });
-
-            // Download report as CSV
-            function downloadReport(chartType) {
+            // Download report as CSV or PDF
+            function downloadReport(chartType, format) {
                 let data;
                 let csvContent = '';
 
-                switch (chartType) {
-                    case 'FileUploadTrends':
-                        data = fileUploadTrends;
-                        csvContent += 'File Name,Document Type,Uploader,Uploader\'s Department,Intended Destination,Upload Date/Time\n';
-                        data.forEach(entry => {
-                            csvContent += `"${entry.document_name}","${entry.document_type}","${entry.uploader_name}","${entry.uploader_department || 'None'}","${entry.target_department_name || 'None'}","${new Date(entry.upload_date).toLocaleString()}"\n`;
-                        });
-                        break;
-                    case 'FileDistribution':
-                        data = fileDistribution;
-                        csvContent += 'File Name,Document Type,Sender,Recipient,Time Sent,Time Received,Department/Subdepartment\n';
-                        data.forEach(entry => {
-                            csvContent += `"${entry.document_name}","${entry.document_type}","${entry.sender_name || 'None'}","${entry.receiver_name || 'None'}","${entry.time_sent ? new Date(entry.time_sent).toLocaleString() : 'N/A'}","${entry.time_received ? new Date(entry.time_received).toLocaleString() : 'N/A'}","${entry.department_name || 'None'}${entry.sub_department_name ? ' / ' + entry.sub_department_name : ''}"\n`;
-                        });
-                        break;
-                    case 'UsersPerDepartment':
-                        data = usersPerDepartment;
-                        csvContent += 'Department,User Count\n';
-                        data.forEach(entry => {
-                            csvContent += `"${entry.department_name}","${entry.user_count}"\n`;
-                        });
-                        break;
-                    case 'DocumentCopies':
-                        data = documentCopies;
-                        csvContent += 'File Name,Copy Count,Offices with Copy,Physical Duplicates\n';
-                        data.forEach(entry => {
-                            csvContent += `"${entry.file_name}","${entry.copy_count}","${entry.offices_with_copy || 'None'}","${entry.physical_duplicates || 'None'}"\n`;
-                        });
-                        break;
-                    case 'PendingRequests':
-                        data = pendingRequestsDetails;
-                        csvContent += 'File Name,Requester,Requester\'s Department,Physical Storage\n';
-                        data.forEach(entry => {
-                            csvContent += `"${entry.file_name}","${entry.requester_name}","${entry.requester_department || 'None'}${entry.requester_subdepartment ? ' / ' + entry.requester_subdepartment : ''}","${entry.physical_storage || 'None'}"\n`;
-                        });
-                        break;
-                    case 'RetrievalHistory':
-                        data = retrievalHistory;
-                        csvContent += 'Transaction ID,Type,Status,Time,User,File Name,Department,Physical Storage\n';
-                        data.forEach(entry => {
-                            csvContent += `"${entry.transaction_id}","${entry.type}","${entry.status}","${new Date(entry.time).toLocaleString()}","${entry.user_name}","${entry.file_name}","${entry.department_name || 'None'}","${entry.physical_storage || 'None'}"\n`;
-                        });
-                        break;
-                    case 'AccessHistory':
-                        data = accessHistory;
-                        csvContent += 'Transaction ID,Time,User,File Name,Type,Department\n';
-                        data.forEach(entry => {
-                            csvContent += `"${entry.transaction_id}","${new Date(entry.time).toLocaleString()}","${entry.user_name}","${entry.file_name}","${entry.type}","${entry.department_name || 'None'}"\n`;
-                        });
-                        break;
-                    default:
-                        alert('Download not implemented for this report type.');
-                        return;
-                }
+                if (format === 'csv') {
+                    switch (chartType) {
+                        case 'FileUploadTrends':
+                            data = fileUploadTrends;
+                            csvContent += 'File Name,Document Type,Uploader,Uploader\'s Department,Intended Destination,Upload Date/Time\n';
+                            data.forEach(entry => {
+                                csvContent += `"${entry.document_name}","${entry.document_type}","${entry.uploader_name}","${entry.uploader_department || 'None'}","${entry.target_department_name || 'None'}","${new Date(entry.upload_date).toLocaleString()}"\n`;
+                            });
+                            break;
+                        case 'FileDistribution':
+                            data = fileDistribution;
+                            csvContent += 'File Name,Document Type,Sender,Recipient,Time Sent,Time Received,Department/Subdepartment\n';
+                            data.forEach(entry => {
+                                csvContent += `"${entry.document_name}","${entry.document_type}","${entry.sender_name || 'None'}","${entry.receiver_name || 'None'}","${entry.time_sent ? new Date(entry.time_sent).toLocaleString() : 'N/A'}","${entry.time_received ? new Date(entry.time_received).toLocaleString() : 'N/A'}","${entry.department_name || 'None'}${entry.sub_department_name ? ' / ' + entry.sub_department_name : ''}"\n`;
+                            });
+                            break;
+                        case 'UsersPerDepartment':
+                            data = usersPerDepartment;
+                            csvContent += 'Department,User Count\n';
+                            data.forEach(entry => {
+                                csvContent += `"${entry.department_name}","${entry.user_count}"\n`;
+                            });
+                            break;
+                        case 'DocumentCopies':
+                            data = documentCopies;
+                            csvContent += 'File Name,Copy Count,Offices with Copy,Physical Duplicates\n';
+                            data.forEach(entry => {
+                                csvContent += `"${entry.file_name}","${entry.copy_count}","${entry.offices_with_copy || 'None'}","${entry.physical_duplicates || 'None'}"\n`;
+                            });
+                            break;
+                        case 'PendingRequests':
+                            data = pendingRequestsDetails;
+                            csvContent += 'File Name,Requester,Requester\'s Department,Physical Storage\n';
+                            data.forEach(entry => {
+                                csvContent += `"${entry.file_name}","${entry.requester_name}","${entry.requester_department || 'None'}${entry.requester_subdepartment ? ' / ' + entry.requester_subdepartment : ''}","${entry.physical_storage || 'None'}"\n`;
+                            });
+                            break;
+                        case 'RetrievalHistory':
+                            data = retrievalHistory;
+                            csvContent += 'Transaction ID,Type,Status,Time,User,File Name,Department,Physical Storage\n';
+                            data.forEach(entry => {
+                                csvContent += `"${entry.transaction_id}","${entry.type}","${entry.status}","${new Date(entry.time).toLocaleString()}","${entry.user_name}","${entry.file_name}","${entry.department_name || 'None'}","${entry.physical_storage || 'None'}"\n`;
+                            });
+                            break;
+                        case 'AccessHistory':
+                            data = accessHistory;
+                            csvContent += 'Transaction ID,Time,User,File Name,Type,Department\n';
+                            data.forEach(entry => {
+                                csvContent += `"${entry.transaction_id}","${new Date(entry.time).toLocaleString()}","${entry.user_name}","${entry.file_name}","${entry.type}","${entry.department_name || 'None'}"\n`;
+                            });
+                            break;
+                        default:
+                            alert('Download not implemented for this report type.');
+                            return;
+                    }
 
-                const blob = new Blob([csvContent], {
-                    type: 'text/csv;charset=utf-8;'
-                });
-                const url = URL.createObjectURL(blob);
-                const link = document.createElement('a');
-                link.setAttribute('href', url);
-                link.setAttribute('download', `${chartType}_Report.csv`);
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                URL.revokeObjectURL(url);
+                    const blob = new Blob([csvContent], {
+                        type: 'text/csv;charset=utf-8;'
+                    });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.setAttribute('href', url);
+                    link.setAttribute('download', `${chartType}_Report.csv`);
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                } else if (format === 'pdf') {
+                    const reportContent = generateReport(chartType);
+                    const tempDiv = document.createElement('div');
+                    tempDiv.innerHTML = reportContent;
+                    document.body.appendChild(tempDiv);
+                    const opt = {
+                        margin: 0.5,
+                        filename: `${chartType}_Report.pdf`,
+                        image: { type: 'png', quality: 0.98 },
+                        html2canvas: { scale: 2 },
+                        jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+                    };
+                    html2pdf().from(tempDiv).set(opt).save().then(() => {
+                        document.body.removeChild(tempDiv);
+                    });
+                }
+                closeDownloadModal();
             }
 
             // Sidebar toggle function
@@ -1204,6 +1202,15 @@ include 'steven.php';
                 mainContent.classList.toggle('sidebar-expanded');
                 mainContent.classList.toggle('sidebar-minimized');
             }
+
+            // Initialize charts on page load
+            document.addEventListener('DOMContentLoaded', () => {
+                initializeCharts();
+                // Update main-content class based on sidebar state
+                const sidebar = document.querySelector('.sidebar');
+                const mainContent = document.querySelector('.main-content');
+                mainContent.classList.add(sidebar.classList.contains('minimized') ? 'sidebar-minimized' : 'sidebar-expanded');
+            });
         </script>
         <style>
             .chart-container {
@@ -1217,25 +1224,32 @@ include 'steven.php';
             }
 
             .chart-data-table {
-                margin-top: 10px;
                 width: 100%;
                 border-collapse: collapse;
                 font-size: 10pt;
+                background-color: #fff;
+                box-shadow: 0 2px 5px rgba(0,0,0,0.1);
             }
 
             .chart-data-table th,
             .chart-data-table td {
-                border: 1px solid #ddd;
-                padding: 8px;
+                border: 1px solid #e0e0e0;
+                padding: 10px;
                 text-align: left;
                 word-wrap: break-word;
             }
 
             .chart-data-table th {
                 background-color: #f0f0f0;
-                font-weight: bold;
+                font-weight: 600;
                 color: #34495e;
                 text-transform: uppercase;
+                font-size: 9pt;
+            }
+
+            .chart-data-table td {
+                color: #333;
+                font-size: 9pt;
             }
 
             .chart-data-table tr:nth-child(even) {
@@ -1258,9 +1272,108 @@ include 'steven.php';
                 border: none;
                 border-radius: 4px;
                 cursor: pointer;
+                font-size: 10pt;
             }
 
             .chart-actions button:hover {
+                background-color: #2c3e50;
+            }
+
+            .modal-overlay {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.5);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                z-index: 1000;
+                padding-top: 20px;
+            }
+
+            .modal-content {
+                background: #fff;
+                padding: 20px;
+                border-radius: 5px;
+                max-width: 50%;
+                max-height: 80%;
+                overflow-y: auto;
+                position: relative;
+                box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+            }
+
+            .modal-close {
+                position: absolute;
+                top: 10px;
+                right: 10px;
+                background: #34495e;
+                color: white;
+                border: none;
+                border-radius: 50%;
+                width: 30px;
+                height: 30px;
+                font-size: 16px;
+                cursor: pointer;
+                line-height: 30px;
+                text-align: center;
+            }
+
+            .modal-close:hover {
+                background: #2c3e50;
+            }
+
+            .pagination-controls {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                margin-bottom: 15px;
+                font-size: 10pt;
+                color: #34495e;
+            }
+
+            .pagination-controls select {
+                padding: 5px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                cursor: pointer;
+            }
+
+            .pagination-controls button {
+                padding: 6px 12px;
+                background-color: #34495e;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+            }
+
+            .pagination-controls button:disabled {
+                background-color: #95a5a6;
+                cursor: not-allowed;
+            }
+
+            .pagination-controls button:hover:not(:disabled) {
+                background-color: #2c3e50;
+            }
+
+            .pagination-controls span {
+                font-weight: 500;
+            }
+
+            .download-options button {
+                padding: 10px 20px;
+                margin: 0 10px;
+                background-color: #34495e;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 12pt;
+            }
+
+            .download-options button:hover {
                 background-color: #2c3e50;
             }
         </style>

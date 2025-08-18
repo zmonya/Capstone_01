@@ -19,12 +19,6 @@ try {
     $stmt->execute([$userId]);
     $notifications = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // Check for invalid timestamps
-    foreach ($notifications as $notification) {
-        if ($notification['timestamp'] === '1970-01-01' || is_null($notification['timestamp'])) {
-            error_log("Invalid timestamp found in notification: " . json_encode($notification));
-        }
-    }
     echo json_encode(['success' => true, 'notifications' => $notifications]);
 } catch (Exception $e) {
     error_log("Fetch notifications error: " . $e->getMessage());

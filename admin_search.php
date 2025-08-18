@@ -113,20 +113,13 @@ function getFileIcon($fileName)
 <html lang="en">
 
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <title>Admin - Filter Files - Arc-Hive</title>
-    <link rel="stylesheet" href="https://code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css" integrity="sha256-wN7i5z9q4rU1uMkp2S2e0B0nqD0qH0qC4Y0lA/6z7g=" crossorigin="anonymous">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" integrity="sha512-z3gLpd7yknf1YoNbCzqRKc4qyor8gaKU1qmn+CShxbuBusANI9QpRohGBreCFkKxLhei6S9CQXFEbbKuqLg0DA==" crossorigin="anonymous">
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/notyf@3/notyf.min.css">
-    <link rel="stylesheet" href="styles.css">
-    <link rel="stylesheet" href="admin-sidebar.css">
-    <link rel="stylesheet" href="admin-interface.css">
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js" integrity="sha256-/xUj+3OJU5yExlq6GSYGSHk7tPXikynS7ogEvDej/m4=" crossorigin="anonymous"></script>
-    <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.min.js" integrity="sha256-VazP97ZCwtekAsvgPBSUwPFKdrwD3unUfSGVYrahUqU=" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/notyf@3/notyf.min.js"></script>
+    <title>Admin - Filter Files - Arc-Hive</title> 
+    <?php
+        include 'admin_head.php';
+    ?>
+
+
+
     <style>
         .filter-section {
             display: flex;
@@ -245,18 +238,9 @@ function getFileIcon($fileName)
 
 <body>
     <!-- Sidebar -->
-    <div class="sidebar">
-        <button class="toggle-btn" title="Toggle Sidebar"><i class="fas fa-bars"></i></button>
-        <h2 class="sidebar-title">Admin Panel</h2>
-        <a href="dashboard.php" class="client-btn"><i class="fas fa-exchange-alt"></i><span class="link-text">Switch to Client View</span></a>
-        <a href="admin_dashboard.php"><i class="fas fa-home"></i><span class="link-text">Dashboard</span></a>
-        <a href="admin_search.php" class="active"><i class="fas fa-search"></i><span class="link-text">View All Files</span></a>
-        <a href="user_management.php"><i class="fas fa-users"></i><span class="link-text">User Management</span></a>
-        <a href="department_management.php"><i class="fas fa-building"></i><span class="link-text">Department Management</span></a>
-        <a href="physical_storage_management.php"><i class="fas fa-archive"></i><span class="link-text">Physical Storage</span></a>
-        <a href="document_type_management.php"><i class="fas fa-file-alt"></i><span class="link-text">Document Type Management</span></a>
-        <a href="logout.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i><span class="link-text">Logout</span></a>
-    </div>
+    <?php
+        include 'admin_menu.php';
+    ?>
 
     <!-- Main Content -->
     <div class="main-content sidebar-expanded">
