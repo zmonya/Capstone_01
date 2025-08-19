@@ -32,7 +32,7 @@
             <span class="link-text">Document Type Management</span>
         </a>
         <a href="backup.php">
-            <i class="fas fa-file-alt"></i>
+            <i class="fas fa-database"></i>
             <span class="link-text">System Backup</span>
             <a href="logout.php" class="logout-btn">
                 <i class="fas fa-sign-out-alt"></i>

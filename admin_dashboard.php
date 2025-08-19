@@ -372,6 +372,16 @@ $accessHistory = $accessHistoryStmt ? $accessHistoryStmt->fetchAll(PDO::FETCH_AS
                 return div.innerHTML;
             }
 
+            // Escape CSV field
+            function escapeCsvField(str) {
+                if (str === null || str === undefined) return '""';
+                const stringified = String(str);
+                if (stringified.includes('"') || stringified.includes(',') || stringified.includes('\n')) {
+                    return `"${stringified.replace(/"/g, '""')}"`;
+                }
+                return `"${stringified}"`;
+            }
+
             // Pagination variables
             let currentPage = 1;
             let itemsPerPage = 5;
@@ -869,8 +879,8 @@ $accessHistory = $accessHistoryStmt ? $accessHistoryStmt->fetchAll(PDO::FETCH_AS
                 });
             });
 
-            // Generate printable report
-            function generateReport(chartType) {
+            // Generate report content
+            function generateReportContent(chartType) {
                 let data;
                 let tableRows = '';
                 let chartImage = '';
@@ -968,7 +978,7 @@ $accessHistory = $accessHistoryStmt ? $accessHistoryStmt->fetchAll(PDO::FETCH_AS
                         break;
                 }
 
-                const reportContent = `
+                return `
                 <html>
                     <head>
                         <title>${chartType} Report - ArcHive</title>
@@ -1093,6 +1103,11 @@ $accessHistory = $accessHistoryStmt ? $accessHistoryStmt->fetchAll(PDO::FETCH_AS
                     </body>
                 </html>
                 `;
+            }
+
+            // Generate printable report
+            function generateReport(chartType) {
+                const reportContent = generateReportContent(chartType);
                 const printWindow = window.open('', '_blank');
                 printWindow.document.write(reportContent);
                 printWindow.document.close();
@@ -1100,7 +1115,6 @@ $accessHistory = $accessHistoryStmt ? $accessHistoryStmt->fetchAll(PDO::FETCH_AS
                     printWindow.focus();
                     printWindow.print();
                 };
-                return reportContent;
             }
 
             // Download report as CSV or PDF
@@ -1114,53 +1128,98 @@ $accessHistory = $accessHistoryStmt ? $accessHistoryStmt->fetchAll(PDO::FETCH_AS
                             data = fileUploadTrends;
                             csvContent += 'File Name,Document Type,Uploader,Uploader\'s Department,Intended Destination,Upload Date/Time\n';
                             data.forEach(entry => {
-                                csvContent += `"${entry.document_name}","${entry.document_type}","${entry.uploader_name}","${entry.uploader_department || 'None'}","${entry.target_department_name || 'None'}","${new Date(entry.upload_date).toLocaleString()}"\n`;
+                                csvContent += [
+                                    escapeCsvField(entry.document_name),
+                                    escapeCsvField(entry.document_type),
+                                    escapeCsvField(entry.uploader_name),
+                                    escapeCsvField(entry.uploader_department || 'None') + (entry.uploader_subdepartment ? ' / ' + escapeCsvField(entry.uploader_subdepartment) : ''),
+                                    escapeCsvField(entry.target_department_name || 'None'),
+                                    escapeCsvField(new Date(entry.upload_date).toLocaleString())
+                                ].join(',') + '\n';
                             });
                             break;
                         case 'FileDistribution':
                             data = fileDistribution;
                             csvContent += 'File Name,Document Type,Sender,Recipient,Time Sent,Time Received,Department/Subdepartment\n';
                             data.forEach(entry => {
-                                csvContent += `"${entry.document_name}","${entry.document_type}","${entry.sender_name || 'None'}","${entry.receiver_name || 'None'}","${entry.time_sent ? new Date(entry.time_sent).toLocaleString() : 'N/A'}","${entry.time_received ? new Date(entry.time_received).toLocaleString() : 'N/A'}","${entry.department_name || 'None'}${entry.sub_department_name ? ' / ' + entry.sub_department_name : ''}"\n`;
+                                csvContent += [
+                                    escapeCsvField(entry.document_name),
+                                    escapeCsvField(entry.document_type),
+                                    escapeCsvField(entry.sender_name || 'None'),
+                                    escapeCsvField(entry.receiver_name || 'None'),
+                                    escapeCsvField(entry.time_sent ? new Date(entry.time_sent).toLocaleString() : 'N/A'),
+                                    escapeCsvField(entry.time_received ? new Date(entry.time_received).toLocaleString() : 'N/A'),
+                                    escapeCsvField((entry.department_name || 'None') + (entry.sub_department_name ? ' / ' + entry.sub_department_name : ''))
+                                ].join(',') + '\n';
                             });
                             break;
                         case 'UsersPerDepartment':
                             data = usersPerDepartment;
                             csvContent += 'Department,User Count\n';
                             data.forEach(entry => {
-                                csvContent += `"${entry.department_name}","${entry.user_count}"\n`;
+                                csvContent += [
+                                    escapeCsvField(entry.department_name),
+                                    escapeCsvField(entry.user_count)
+                                ].join(',') + '\n';
                             });
                             break;
                         case 'DocumentCopies':
                             data = documentCopies;
                             csvContent += 'File Name,Copy Count,Offices with Copy,Physical Duplicates\n';
                             data.forEach(entry => {
-                                csvContent += `"${entry.file_name}","${entry.copy_count}","${entry.offices_with_copy || 'None'}","${entry.physical_duplicates || 'None'}"\n`;
+                                csvContent += [
+                                    escapeCsvField(entry.file_name),
+                                    escapeCsvField(entry.copy_count),
+                                    escapeCsvField(entry.offices_with_copy || 'None'),
+                                    escapeCsvField(entry.physical_duplicates || 'None')
+                                ].join(',') + '\n';
                             });
                             break;
                         case 'PendingRequests':
                             data = pendingRequestsDetails;
                             csvContent += 'File Name,Requester,Requester\'s Department,Physical Storage\n';
                             data.forEach(entry => {
-                                csvContent += `"${entry.file_name}","${entry.requester_name}","${entry.requester_department || 'None'}${entry.requester_subdepartment ? ' / ' + entry.requester_subdepartment : ''}","${entry.physical_storage || 'None'}"\n`;
+                                csvContent += [
+                                    escapeCsvField(entry.file_name),
+                                    escapeCsvField(entry.requester_name),
+                                    escapeCsvField((entry.requester_department || 'None') + (entry.requester_subdepartment ? ' / ' + entry.requester_subdepartment : '')),
+                                    escapeCsvField(entry.physical_storage || 'None')
+                                ].join(',') + '\n';
                             });
                             break;
                         case 'RetrievalHistory':
                             data = retrievalHistory;
                             csvContent += 'Transaction ID,Type,Status,Time,User,File Name,Department,Physical Storage\n';
                             data.forEach(entry => {
-                                csvContent += `"${entry.transaction_id}","${entry.type}","${entry.status}","${new Date(entry.time).toLocaleString()}","${entry.user_name}","${entry.file_name}","${entry.department_name || 'None'}","${entry.physical_storage || 'None'}"\n`;
+                                csvContent += [
+                                    escapeCsvField(entry.transaction_id),
+                                    escapeCsvField(entry.type),
+                                    escapeCsvField(entry.status),
+                                    escapeCsvField(new Date(entry.time).toLocaleString()),
+                                    escapeCsvField(entry.user_name),
+                                    escapeCsvField(entry.file_name),
+                                    escapeCsvField(entry.department_name || 'None'),
+                                    escapeCsvField(entry.physical_storage || 'None')
+                                ].join(',') + '\n';
                             });
                             break;
                         case 'AccessHistory':
                             data = accessHistory;
                             csvContent += 'Transaction ID,Time,User,File Name,Type,Department\n';
                             data.forEach(entry => {
-                                csvContent += `"${entry.transaction_id}","${new Date(entry.time).toLocaleString()}","${entry.user_name}","${entry.file_name}","${entry.type}","${entry.department_name || 'None'}"\n`;
+                                csvContent += [
+                                    escapeCsvField(entry.transaction_id),
+                                    escapeCsvField(new Date(entry.time).toLocaleString()),
+                                    escapeCsvField(entry.user_name),
+                                    escapeCsvField(entry.file_name),
+                                    escapeCsvField(entry.type),
+                                    escapeCsvField(entry.department_name || 'None')
+                                ].join(',') + '\n';
                             });
                             break;
                         default:
                             alert('Download not implemented for this report type.');
+                            closeDownloadModal();
                             return;
                     }
 
@@ -1176,9 +1235,11 @@ $accessHistory = $accessHistoryStmt ? $accessHistoryStmt->fetchAll(PDO::FETCH_AS
                     document.body.removeChild(link);
                     URL.revokeObjectURL(url);
                 } else if (format === 'pdf') {
-                    const reportContent = generateReport(chartType);
+                    const reportContent = generateReportContent(chartType);
                     const tempDiv = document.createElement('div');
                     tempDiv.innerHTML = reportContent;
+                    tempDiv.style.position = 'absolute';
+                    tempDiv.style.left = '-9999px';
                     document.body.appendChild(tempDiv);
                     const opt = {
                         margin: 0.5,
@@ -1190,6 +1251,10 @@ $accessHistory = $accessHistoryStmt ? $accessHistoryStmt->fetchAll(PDO::FETCH_AS
                     html2pdf().from(tempDiv).set(opt).save().then(() => {
                         document.body.removeChild(tempDiv);
                     });
+                } else {
+                    alert('Invalid format selected.');
+                    closeDownloadModal();
+                    return;
                 }
                 closeDownloadModal();
             }

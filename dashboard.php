@@ -181,13 +181,20 @@ function getFileIcon(string $fileName): string
 <!DOCTYPE html>
 <html lang="en">
 
-<head>    
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+    <meta http-equiv="X-Frame-Options" content="DENY">
+    <meta http-equiv="X-XSS-Protection" content="1; mode=block">
     <title>Dashboard - Document Archival</title>
-
-    <?php
-     include 'user_head.php';
-    ?> 
-
+    <link rel="stylesheet" href="https://code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+    <link href="arXiv.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/notyf@3/notyf.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css">
+    <link rel="stylesheet" href="style/dashboard.css">
+    <link rel="stylesheet" href="style/client-sidebar.css">
     <style>
         .notification-log .no-notifications {
             color: #6c757d;
@@ -196,16 +203,33 @@ function getFileIcon(string $fileName): string
             padding: 10px;
         }
     </style>
-
+    <!-- Include required JavaScript libraries -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/notyf@3/notyf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+    <!-- Custom JavaScript for dashboard functionality (must be implemented) -->
+    <script src="js/dashboard.js"></script>
 </head>
 
 <body>
-<?php
-    include 'user_menu.php';
-?>
-
-
-
+    <aside class="sidebar" role="navigation" aria-label="Main Navigation">
+        <button class="toggle-btn" title="Toggle Sidebar" aria-label="Toggle Sidebar"><i class="fas fa-bars"></i></button>
+        <h2 class="sidebar-title">Document Archival</h2>
+        <?php if ($userRole === 'admin'): ?>
+            <a href="admin_dashboard.php" class="admin-dashboard-btn" data-tooltip="Admin Dashboard" aria-label="Admin Dashboard">
+                <i class="fas fa-user-shield"></i><span class="link-text">Admin Dashboard</span>
+            </a>
+        <?php endif; ?>
+        <a href="dashboard.php" class="<?= htmlspecialchars(basename($_SERVER['PHP_SELF']) === 'dashboard.php' ? 'active' : '') ?>" data-tooltip="Dashboard" aria-label="Dashboard">
+            <i class="fas fa-home"></i><span class="link-text">Dashboard</span>
+        </a>
+        <a href="my-report.php" data-tooltip="My Report" aria-label="My Report">
+            <i class="fas fa-chart-bar"></i><span class="link-text">My Report</span>
+        </a>
+        <a href="my-folder.php" class="<?= htmlspecialchars(basename($_SERVER['PHP_SELF']) === 'my-folder.php' ? 'active' : '') ?>" data-tooltip="My Folder" aria-label="My Folder">
+            <i class="fas fa-folder"></i><span class="link-text">My Folder</span>
+        </a>
         <?php foreach ($userDepartments as $dept): ?>
             <a href="department_folder.php?department_id=<?= htmlspecialchars(filter_var($dept['department_id'], FILTER_SANITIZE_NUMBER_INT)) ?>"
                 class="<?= isset($_GET['department_id']) && (int)$_GET['department_id'] === $dept['department_id'] ? 'active' : '' ?>"
@@ -215,13 +239,10 @@ function getFileIcon(string $fileName): string
                 <span class="link-text"><?= htmlspecialchars($dept['department_name'] ?? 'Unnamed Department') ?></span>
             </a>
         <?php endforeach; ?>
-
-
         <a href="logout.php" class="logout-btn" data-tooltip="Logout" aria-label="Logout">
             <i class="fas fa-sign-out-alt"></i><span class="link-text">Logout</span>
         </a>
     </aside>
-
 
     <header class="top-nav" role="banner">
         <h2>Dashboard</h2>
@@ -274,6 +295,7 @@ function getFileIcon(string $fileName): string
             </div>
             <div class="upload-file" id="fileUpload">
                 <h3>Upload File</h3>
+                <!-- Ensure backend PHP validates file types, sizes, and stores in `files` table -->
                 <input type="file" id="fileInput" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.png,.txt,.zip" style="display: none;" aria-label="Upload File">
                 <button type="button" id="uploadFileButton" aria-label="Upload File">Upload File</button>
             </div>
@@ -486,6 +508,7 @@ function getFileIcon(string $fileName): string
                 </select>
                 <label for="cabinet">Cabinet:</label>
                 <input type="text" id="cabinet" name="cabinet" aria-label="Cabinet">
+                <!-- Dynamic fields should be populated based on document_types table -->
                 <div id="dynamicFields"></div>
                 <div class="hardcopy-options">
                     <label class="checkbox-container">
@@ -576,6 +599,7 @@ function getFileIcon(string $fileName): string
             <button class="exit-button" onclick="closePopup('fileAcceptancePopup')" aria-label="Close Popup">×</button>
             <h3 id="fileAcceptanceTitle">Review File</h3>
             <p id="fileAcceptanceMessage"></p>
+            <!-- JavaScript should populate file preview -->
             <div class="file-preview" id="filePreview"></div>
             <div class="button-group">
                 <button id="acceptFileButton" aria-label="Accept File">Accept</button>
@@ -609,6 +633,10 @@ function getFileIcon(string $fileName): string
         </div>
     </main>
 
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/notyf@3/notyf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
     <script>
         const notyf = new Notyf();
         let selectedFile = null;
@@ -783,6 +811,12 @@ function getFileIcon(string $fileName): string
                         }
                     });
                 }
+            });
+
+            // Form Submission
+            $('#fileDetailsForm').on('submit', function(e) {
+                e.preventDefault();
+                proceedToHardcopy();
             });
 
             // File Selection
@@ -1292,13 +1326,7 @@ function getFileIcon(string $fileName): string
             if (isHardCopy) {
                 $files.filter(function() {
                     return !$(this).data('hard-copy');
-                }).forEach(function(item) {
-                    $(item).hide();
-                });
-            } else {
-                $files.forEach(function(item) {
-                    $(item).show();
-                });
+                }).remove();
             }
 
             $('#personalFiles').empty().append($files);
@@ -1335,13 +1363,7 @@ function getFileIcon(string $fileName): string
             if (isHardCopy) {
                 $files.filter(function() {
                     return !$(this).data('hard-copy');
-                }).forEach(function(item) {
-                    $(item).hide();
-                });
-            } else {
-                $files.forEach(function(item) {
-                    $(item).show();
-                });
+                }).remove();
             }
 
             $grid.empty().append($files);
